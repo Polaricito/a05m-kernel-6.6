@@ -66,8 +66,10 @@ jobs:
         run: |
           CFG=$(find . -iname "kernelsu.config" 2>/dev/null | head -n1)
           if [ -z "$CFG" ]; then
-            echo "❌ No se encontró kernelsu.config directamente. Candidatos con CONFIG_KSU:"
-            grep -rl "CONFIG_KSU" --include="*.config" . 2>/dev/null
+            CFG=$(grep -rl "CONFIG_KSU" --include="*.config" . 2>/dev/null | head -n1)
+          fi
+          if [ -z "$CFG" ]; then
+            echo "❌ No se encontró ningún config con CONFIG_KSU"
             exit 1
           fi
           echo "Usando config: $CFG"
