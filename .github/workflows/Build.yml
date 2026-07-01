@@ -1,16 +1,24 @@
-name: Build A05m Kernel (KSU-Next + SUSFS)
+name: Build A05m Kernel
 
 on:
   workflow_dispatch:
     inputs:
-      use_susfs:
-        description: "Integrar SUSFS (rama next-susfs, experimental)"
-        type: boolean
-        default: true
+      root_provider:
+        description: "Solución de root"
+        type: choice
+        options:
+          - ksu-next-stable
+          - sukisu-ultra-susfs
+        default: ksu-next-stable
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -21,6 +29,7 @@ jobs:
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache
           sudo apt-get clean
+          df -h
 
       - name: Instalar dependencias
         run: |
@@ -29,59 +38,48 @@ jobs:
             libncurses-dev python3 python3-pip zip unzip rsync kmod cpio \
             device-tree-compiler default-jdk git curl patch
 
-      - name: Descargar toolchain
+      - name: Descargar toolchain (con reintentos)
         run: |
           pip install gdown
-          gdown "https://drive.google.com/uc?id=1vsQfRgdNHlD0md9tF7j5fpkL_17whzbH" -O toolchain.tar.gz
+          for i in 1 2 3; do
+            gdown "https://drive.google.com/uc?id=1vsQfRgdNHlD0md9tF7j5fpkL_17whzbH" -O toolchain.tar.gz && break
+            echo "Intento $i falló, reintentando en 10s..."
+            sleep 10
+          done
+          test -s toolchain.tar.gz || { echo "❌ No se pudo descargar el toolchain"; exit 1; }
           tar -xf toolchain.tar.gz
 
-      - name: Neutralizar el setup.sh viejo en build_kernel.sh
+      - name: Neutralizar setup.sh original en build_kernel.sh
         run: |
           sed -i '/rsuntk\/KernelSU\/main\/kernel\/setup.sh/d' build_kernel.sh
-          grep -n "setup.sh" build_kernel.sh || echo "Línea vieja removida OK"
 
-      - name: Integrar KernelSU-Next (rama next-susfs)
+      - name: Integrar KernelSU-Next (estable, sin SUSFS)
+        if: ${{ inputs.root_provider == 'ksu-next-stable' }}
         working-directory: ./kernel-6.6
         run: |
-          curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/next-susfs/kernel/setup.sh" | bash -s next-susfs
-         
-      - name: Clonar SUSFS (commit pineado, confirmado por WildKernels)
-        if: ${{ inputs.use_susfs }}
-        run: |
-          git clone https://gitlab.com/simonpunk/susfs4ksu.git susfs4ksu
-          cd susfs4ksu
-          git checkout 2df41de789026a6422521606402576507c687435
-          cd ..
-          ls susfs4ksu/kernel_patches/*.patch
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/refs/heads/next/kernel/setup.sh" | bash -s next
+          test -d KernelSU-Next || { echo "❌ Falló la integración de KernelSU-Next"; exit 1; }
 
-      - name: Aplicar patches de SUSFS (fs + manual hooks)
-        if: ${{ inputs.use_susfs }}
+      - name: Integrar SukiSU-Ultra (con SUSFS built-in, experimental)
+        if: ${{ inputs.root_provider == 'sukisu-ultra-susfs' }}
         working-directory: ./kernel-6.6
         run: |
-          cp ../susfs4ksu/kernel_patches/fs/* fs/ 2>/dev/null || true
-          cp ../susfs4ksu/kernel_patches/include/linux/* include/linux/ 2>/dev/null || true
-          cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch . 2>/dev/null || true
-          cp ../susfs4ksu/kernel_patches/60_scope-minimized_manual_hooks.patch . 2>/dev/null || true
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s susfs-main
+          test -d KernelSU || test -d SukiSU-Ultra || echo "⚠️ Verificar carpeta creada por setup.sh (revisar log de arriba)"
 
-          patch -p1 --fuzz=3 < 50_add_susfs_in_gki-android15-6.6.patch || \
-            echo "⚠️ Rechazos en patch 50 — revisar"
-
-          patch -p1 --fuzz=3 < 60_scope-minimized_manual_hooks.patch || \
-            echo "⚠️ Rechazos en patch 60 — revisar"
-      
-      - name: Habilitar configs de SUSFS
-        if: ${{ inputs.use_susfs }}
+      - name: Habilitar CONFIG_KSU en overlay
         run: |
-          CFG=$(find . -iname "kernelsu.config" 2>/dev/null | head -n1)
+          CFG=$(grep -rl "CONFIG_KSU" --include="*.config" . 2>/dev/null | head -n1)
           if [ -z "$CFG" ]; then
-            CFG=$(grep -rl "CONFIG_KSU" --include="*.config" . 2>/dev/null | head -n1)
-          fi
-          if [ -z "$CFG" ]; then
-            echo "❌ No se encontró ningún config con CONFIG_KSU"
-            exit 1
+            CFG="./kernel/kernel_device_modules-6.6/kernel/configs/mt6768_overlay.config"
+            echo "⚠️ No se encontró config existente con CONFIG_KSU, usando default: $CFG"
           fi
           echo "Usando config: $CFG"
-          cat >> "$CFG" << 'EOF'
+          if ! grep -q "CONFIG_KSU=y" "$CFG"; then
+            echo "CONFIG_KSU=y" >> "$CFG"
+          fi
+          if [ "${{ inputs.root_provider }}" = "sukisu-ultra-susfs" ]; then
+            cat >> "$CFG" << 'EOF'
           CONFIG_KSU_SUSFS=y
           CONFIG_KSU_SUSFS_SUS_PATH=y
           CONFIG_KSU_SUSFS_SUS_MOUNT=y
@@ -89,17 +87,37 @@ jobs:
           CONFIG_KSU_SUSFS_SPOOF_UNAME=y
           CONFIG_KSU_SUSFS_SPOOF_CMDLINE=y
           CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
-          CONFIG_KSU_SUSFS_SUS_SU=n
           EOF
+          fi
+
+      - name: Cache de Bazel
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/bazel
+            ~/.cache/bazelisk
+          key: bazel-cache-${{ runner.os }}-${{ inputs.root_provider }}-${{ hashFiles('kernel/WORKSPACE') }}
 
       - name: Compilar
         run: |
           chmod +x build_kernel.sh
           bash build_kernel.sh
 
+      - name: Verificar que se generó el zip
+        run: |
+          ls -la *.zip || { echo "❌ No se generó ningún zip, revisar log de Compilar"; exit 1; }
+
       - name: Subir artifact
         uses: actions/upload-artifact@v4
         with:
-          name: a05m-kernel-susfs-${{ github.run_number }}
+          name: a05m-kernel-${{ inputs.root_provider }}-${{ github.run_number }}
           path: "*.zip"
           retention-days: 14
+
+      - name: Crear Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ inputs.root_provider }}-${{ github.run_number }}
+          files: "*.zip"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
