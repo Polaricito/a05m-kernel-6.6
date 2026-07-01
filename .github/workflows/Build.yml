@@ -44,23 +44,31 @@ jobs:
         working-directory: ./kernel-6.6
         run: |
           curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/next-susfs/kernel/setup.sh" | bash -s next-susfs
-
-      - name: Clonar patches de SUSFS (gki-android15-6.6-dev)
+         
+      - name: Clonar SUSFS (commit pineado, confirmado por WildKernels)
         if: ${{ inputs.use_susfs }}
         run: |
-          git clone --depth 1 -b gki-android15-6.6-dev https://gitlab.com/simonpunk/susfs4ksu.git susfs4ksu
+          git clone https://gitlab.com/simonpunk/susfs4ksu.git susfs4ksu
+          cd susfs4ksu
+          git checkout 2df41de789026a6422521606402576507c687435
+          cd ..
+          ls susfs4ksu/kernel_patches/*.patch
 
-      - name: Aplicar patches de SUSFS
+      - name: Aplicar patches de SUSFS (fs + manual hooks)
         if: ${{ inputs.use_susfs }}
         working-directory: ./kernel-6.6
         run: |
           cp ../susfs4ksu/kernel_patches/fs/* fs/ 2>/dev/null || true
           cp ../susfs4ksu/kernel_patches/include/linux/* include/linux/ 2>/dev/null || true
           cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch . 2>/dev/null || true
+          cp ../susfs4ksu/kernel_patches/60_scope-minimized_manual_hooks.patch . 2>/dev/null || true
 
           patch -p1 --fuzz=3 < 50_add_susfs_in_gki-android15-6.6.patch || \
-            echo "⚠️ Hubo rechazos (.rej) — revisar log, puede necesitar ajuste manual"
+            echo "⚠️ Rechazos en patch 50 — revisar"
 
+          patch -p1 --fuzz=3 < 60_scope-minimized_manual_hooks.patch || \
+            echo "⚠️ Rechazos en patch 60 — revisar"
+      
       - name: Habilitar configs de SUSFS
         if: ${{ inputs.use_susfs }}
         run: |
