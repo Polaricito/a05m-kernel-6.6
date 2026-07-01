@@ -1,0 +1,72 @@
+name: Build A05m Kernel
+
+on:
+  workflow_dispatch:
+    inputs:
+      use_ksu_next:
+        description: "Usar KernelSU-Next en vez de la de rsuntk"
+        type: boolean
+        default: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Liberar espacio en el runner
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache
+          sudo apt-get clean
+
+      - name: Instalar dependencias base
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential bc bison flex libssl-dev \
+            libncurses-dev python3 python3-pip zip unzip rsync kmod cpio \
+            device-tree-compiler default-jdk git curl
+
+      - name: Descargar toolchain
+        run: |
+          pip install gdown
+          gdown "https://drive.google.com/uc?id=1vsQfRgdNHlD0md9tF7j5fpkL_17whzbH" -O toolchain.tar.gz
+          tar -xf toolchain.tar.gz
+
+      - name: Cambiar a KernelSU-Next
+        if: ${{ inputs.use_ksu_next }}
+        run: |
+          sed -i \
+            's#rsuntk/KernelSU/main/kernel/setup.sh" | bash -s main#KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next#' \
+            build_kernel.sh
+          grep "setup.sh" build_kernel.sh
+
+      - name: Cache de Bazel
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/bazel
+            ~/.cache/bazelisk
+          key: bazel-cache-${{ runner.os }}-${{ hashFiles('kernel/WORKSPACE') }}
+
+      - name: Compilar
+        run: |
+          chmod +x build_kernel.sh
+          bash build_kernel.sh
+
+      - name: Subir artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: a05m-kernel-${{ github.run_number }}
+          path: "*.zip"
+          retention-days: 14
+
+      - name: Crear Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          files: "*.zip"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
