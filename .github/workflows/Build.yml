@@ -57,14 +57,14 @@ jobs:
           cp ../susfs4ksu/kernel_patches/fs/* fs/ 2>/dev/null || true
           cp ../susfs4ksu/kernel_patches/include/linux/* include/linux/ 2>/dev/null || true
           cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch . 2>/dev/null || true
-          cp ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU/ 2>/dev/null || true
+          cp ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU-Next/ 2>/dev/null || true
 
           patch -p1 --fuzz=3 < 50_add_susfs_in_gki-android15-6.6.patch || \
             echo "⚠️ Hubo rechazos (.rej) — revisar log, puede necesitar ajuste manual"
 
-          cd KernelSU
+          cd KernelSU-Next
           patch -p1 --fuzz=3 < 10_enable_susfs_for_ksu.patch || \
-            echo "⚠️ Rechazo en patch de KernelSU — revisar"
+            echo "⚠️ Rechazo en patch de KernelSU-Next — revisar"
 
       - name: Habilitar configs de SUSFS
         if: ${{ inputs.use_susfs }}
