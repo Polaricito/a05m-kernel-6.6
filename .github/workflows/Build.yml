@@ -57,19 +57,19 @@ jobs:
           cp ../susfs4ksu/kernel_patches/fs/* fs/ 2>/dev/null || true
           cp ../susfs4ksu/kernel_patches/include/linux/* include/linux/ 2>/dev/null || true
           cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch . 2>/dev/null || true
-          cp ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU-Next/ 2>/dev/null || true
 
           patch -p1 --fuzz=3 < 50_add_susfs_in_gki-android15-6.6.patch || \
             echo "⚠️ Hubo rechazos (.rej) — revisar log, puede necesitar ajuste manual"
 
-          cd KernelSU-Next
-          patch -p1 --fuzz=3 < 10_enable_susfs_for_ksu.patch || \
-            echo "⚠️ Rechazo en patch de KernelSU-Next — revisar"
-
       - name: Habilitar configs de SUSFS
         if: ${{ inputs.use_susfs }}
         run: |
-          CFG=$(find kernel/kernel_device_modules-6.6/kernel/configs -iname "kernelsu.config" | head -n1)
+          CFG=$(find . -iname "kernelsu.config" 2>/dev/null | head -n1)
+          if [ -z "$CFG" ]; then
+            echo "❌ No se encontró kernelsu.config directamente. Candidatos con CONFIG_KSU:"
+            grep -rl "CONFIG_KSU" --include="*.config" . 2>/dev/null
+            exit 1
+          fi
           echo "Usando config: $CFG"
           cat >> "$CFG" << 'EOF'
           CONFIG_KSU_SUSFS=y
