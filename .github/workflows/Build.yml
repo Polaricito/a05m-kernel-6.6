@@ -45,11 +45,10 @@ jobs:
         run: |
           curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/next-susfs/kernel/setup.sh" | bash -s next-susfs
 
-      - name: Clonar patches de SUSFS (gki-android15-6.6)
+      - name: Clonar patches de SUSFS (gki-android15-6.6-dev)
         if: ${{ inputs.use_susfs }}
         run: |
-          git clone --depth 1 -b gki-android15-6.6 https://gitlab.com/pershoot/susfs4ksu.git susfs4ksu || \
-          git clone --depth 1 -b gki-android15-6.6-dev https://gitlab.com/pershoot/susfs4ksu.git susfs4ksu
+          git clone --depth 1 -b gki-android15-6.6-dev https://gitlab.com/simonpunk/susfs4ksu.git susfs4ksu
 
       - name: Aplicar patches de SUSFS
         if: ${{ inputs.use_susfs }}
