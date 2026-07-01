@@ -57,8 +57,10 @@ jobs:
         if: ${{ inputs.root_provider == 'ksu-next-stable' }}
         working-directory: ./kernel-6.6
         run: |
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/refs/heads/next/kernel/setup.sh" | bash -s next
-          test -d KernelSU-Next || { echo "❌ Falló la integración de KernelSU-Next"; exit 1; }
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/refs/heads/dev/kernel/setup.sh" | bash -s dev || \
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/refs/heads/next/kernel/setup.sh" | bash -s stable
+
+          test -d KernelSU-Next || { echo "❌ Falló la integración de KernelSU-Next (ni dev ni stable funcionaron)"; exit 1; }
 
       - name: Integrar SukiSU-Ultra (con SUSFS built-in, experimental)
         if: ${{ inputs.root_provider == 'sukisu-ultra-susfs' }}
