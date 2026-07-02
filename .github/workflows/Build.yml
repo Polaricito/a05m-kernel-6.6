@@ -41,28 +41,13 @@ jobs:
       - name: Descargar toolchain (con reintentos)
         run: |
           pip install gdown
-          FILEID="1Nq0bm5VMJKt32RRV0_AzBPvpH6YflE5F"
-
           for i in 1 2 3; do
-            # usar --id para evitar problemas de URL/redirect
-            gdown --id "$FILEID" -O toolchain.tar.gz && break
+            gdown "https://drive.google.com/uc?id=1Nq0bm5VMJKt32RRV0_AzBPvpH6YflE5F&&export=download" -O toolchain.tar.gz && break
             echo "Intento $i falló, reintentando en 10s..."
             sleep 10
           done
-
-          test -s toolchain.tar.gz || { echo "❌ No se pudo descargar el toolchain"; ls -la; exit 1; }
-
-          # validar que sea un gzip/tar válido antes de extraer
-          if ! gzip -t toolchain.tar.gz >/dev/null 2>&1; then
-            echo "❌ El archivo descargado NO es un gzip válido. Mostrar primeras 200 líneas (por si es HTML):"
-            head -n 200 toolchain.tar.gz || true
-            echo "Mostrar primeros bytes en hex (magic bytes):"
-            hexdump -C -n 64 toolchain.tar.gz || true
-            exit 1
-          fi
-
-          # Extraer usando -z para gzip
-          tar -xzf toolchain.tar.gz
+          test -s toolchain.tar.gz || { echo "❌ No se pudo descargar el toolchain"; exit 1; }
+          tar -xf toolchain.tar.gz
  
       - name: Neutralizar setup.sh original en build_kernel.sh
         run: |
@@ -73,7 +58,7 @@ jobs:
         working-directory: ./kernel-6.6
         run: |
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/refs/heads/dev/kernel/setup.sh" | bash -s v3.2.0
-
+ 
           test -d KernelSU-Next || { echo "❌ Falló la integración de KernelSU-Next"; exit 1; }
           echo "KSUN_COMMIT=$(cd KernelSU-Next && git rev-parse HEAD)" >> "$GITHUB_ENV"
  
@@ -179,3 +164,4 @@ jobs:
           files: "*.zip"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+ 
