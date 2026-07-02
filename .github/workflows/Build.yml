@@ -42,7 +42,7 @@ jobs:
         run: |
           pip install gdown
           for i in 1 2 3; do
-            gdown "https://drive.google.com/uc?id=1vsQfRgdNHlD0md9tF7j5fpkL_17whzbH" -O toolchain.tar.gz && break
+            gdown "https://drive.usercontent.google.com/download?id=1Nq0bm5VMJKt32RRV0_AzBPvpH6YflE5F&" -O toolchain.tar.gz && break
             echo "Intento $i falló, reintentando en 10s..."
             sleep 10
           done
