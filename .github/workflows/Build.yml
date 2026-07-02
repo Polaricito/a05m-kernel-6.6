@@ -28,6 +28,8 @@ jobs:
       - name: Liberar espacio en el runner
         run: |
           sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache
+          sudo rm -rf /usr/local/lib/android/sdk/system-images \
+                      /usr/local/lib/android/sdk/emulator
           sudo apt-get clean
           df -h
 
@@ -67,9 +69,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
-
-      - name: Compilar manager de KernelSU-Next (mismo commit que el kernel)
+          java-version: 21
         if: ${{ inputs.root_provider == 'ksu-next-stable' }}
         run: |
           git clone https://github.com/KernelSU-Next/KernelSU-Next.git ksun-manager-src
@@ -101,9 +101,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
-
-      - name: Compilar manager de SukiSU-Ultra (mismo commit que el kernel)
+          java-version: 21
         if: ${{ inputs.root_provider == 'sukisu-ultra-v4.1.3' }}
         run: |
           git clone https://github.com/SukiSU-Ultra/SukiSU-Ultra.git suki-manager-src
