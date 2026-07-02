@@ -38,58 +38,16 @@ jobs:
             libncurses-dev python3 python3-pip zip unzip rsync kmod cpio \
             device-tree-compiler default-jdk git curl patch
 
-      - name: Descargar toolchain (multi-fuente con reintentos)
+      - name: Descargar toolchain (con reintentos)
         run: |
           pip install gdown
-          
-          # Función para intentar descargar con reintentos
-          download_with_retries() {
-            local url=$1
-            local output=$2
-            local max_attempts=3
-            local wait_time=10
-            
-            for attempt in $(seq 1 $max_attempts); do
-              echo "📥 Intento $attempt: Descargando desde $url"
-              
-              if [[ $url == *"drive.google.com"* ]]; then
-                # Google Drive con gdown
-                if gdown "$url" -O "$output" 2>/dev/null; then
-                  echo "✅ Descarga exitosa desde Google Drive"
-                  return 0
-                fi
-              elif [[ $url == *"dropbox.com"* ]]; then
-                # Dropbox con wget (agregar ?dl=1 para forzar descarga)
-                if wget -q "$url?dl=1" -O "$output" 2>/dev/null; then
-                  echo "✅ Descarga exitosa desde Dropbox"
-                  return 0
-                fi
-              else
-                # URL genérica con wget/curl
-                if wget -q "$url" -O "$output" 2>/dev/null || curl -L "$url" -o "$output" 2>/dev/null; then
-                  echo "✅ Descarga exitosa desde $url"
-                  return 0
-                fi
-              fi
-              
-              if [ $attempt -lt $max_attempts ]; then
-                wait_time=$((wait_time * 2))  # Exponential backoff
-                echo "⏳ Reintentando en ${wait_time}s..."
-                sleep "$wait_time"
-              fi
-            done
-            
-            return 1
-          }
-          
-          # Array de URLs de fuentes alternativas (prioridad)
-           # Array de URLs de fuentes alternativas (prioridad)
-           declare -a SOURCES=(
-             "https://drive.google.com/uc?id=1vsQfRgdNHlD0md9tF7j5fpkL_17whzbH"
-             "https://www.dropbox.com/s/YOUR-FILE-ID/toolchain.tar.gz"
-             "https://your-s3-bucket.s3.amazonaws.com/toolchain.tar.gz"
-             "https://github.com/YOUR-RELEASES-URL/toolchain.tar.gz"
-           )
+          for i in 1 2 3; do
+            gdown "https://drive.google.com/uc?id=1vsQfRgdNHlD0md9tF7j5fpkL_17whzbH" -O toolchain.tar.gz && break
+            echo "Intento $i falló, reintentando en 10s..."
+            sleep 10
+          done
+          test -s toolchain.tar.gz || { echo "❌ No se pudo descargar el toolchain"; exit 1; }
+          tar -xf toolchain.tar.gz
           
           # Intentar descargar desde cada fuente
           downloaded=false
