@@ -10,6 +10,14 @@ on:
           - ksu-next-stable
           - sukisu-ultra-v4.1.3
         default: ksu-next-stable
+      ksun_tag:
+        description: "Tag/rama de KernelSU-Next (debe existir un release oficial con ese tag)"
+        type: string
+        default: v3.2.0
+      sukisu_tag:
+        description: "Tag/rama de SukiSU-Ultra"
+        type: string
+        default: v4.1.3
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -55,47 +63,37 @@ jobs:
         run: |
           sed -i '/rsuntk\/KernelSU\/main\/kernel\/setup.sh/d' build_kernel.sh
 
-      - name: Integrar KernelSU-Next (tag v3.2.0, matchea manager público)
+      - name: Integrar KernelSU-Next (tag configurable, matchea manager público)
         if: ${{ inputs.root_provider == 'ksu-next-stable' }}
         working-directory: ./kernel-6.6
         run: |
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/refs/heads/dev/kernel/setup.sh" | bash -s v3.2.0
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/refs/heads/dev/kernel/setup.sh" | bash -s "${{ inputs.ksun_tag }}"
 
           test -d KernelSU-Next || { echo "❌ Falló la integración de KernelSU-Next"; exit 1; }
           echo "KSUN_COMMIT=$(cd KernelSU-Next && git rev-parse HEAD)" >> "$GITHUB_ENV"
 
-      - name: Setup Java (solo para compilar el manager de KernelSU-Next)
-        if: ${{ inputs.root_provider == 'ksu-next-stable' }}
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 21
-
-      - name: Compilar manager de KernelSU-Next (mismo commit que el kernel)
+      - name: Descargar manager oficial de KernelSU-Next
         if: ${{ inputs.root_provider == 'ksu-next-stable' }}
         run: |
-          git clone https://github.com/KernelSU-Next/KernelSU-Next.git ksun-manager-src
-          cd ksun-manager-src
-          git checkout "$KSUN_COMMIT"
-          cd manager
-          echo "sdk.dir=$ANDROID_HOME" > local.properties
-          chmod +x gradlew
-          ./gradlew assembleRelease
-          find . -name "*.apk"
+          APK_URL=$(curl -s "https://api.github.com/repos/KernelSU-Next/KernelSU-Next/releases/tags/${{ inputs.ksun_tag }}" | grep "browser_download_url.*\.apk" | cut -d '"' -f 4 | head -n1)
+          test -n "$APK_URL" || { echo "❌ No se encontró un release con tag ${{ inputs.ksun_tag }}"; exit 1; }
+          echo "Descargando: $APK_URL"
+          curl -LSs "$APK_URL" -o KernelSU-Next-manager.apk
+          ls -la KernelSU-Next-manager.apk
 
       - name: Subir manager APK (KernelSU-Next)
         if: ${{ inputs.root_provider == 'ksu-next-stable' }}
         uses: actions/upload-artifact@v4
         with:
           name: ksun-manager-${{ github.run_number }}
-          path: ksun-manager-src/manager/**/*.apk
+          path: KernelSU-Next-manager.apk
           retention-days: 14
 
-      - name: Integrar SukiSU-Ultra (tag v4.1.3, matchea manager público)
+      - name: Integrar SukiSU-Ultra (tag configurable)
         if: ${{ inputs.root_provider == 'sukisu-ultra-v4.1.3' }}
         working-directory: ./kernel-6.6
         run: |
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s v4.1.3
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s "${{ inputs.sukisu_tag }}"
           echo "SUKISU_COMMIT=$(cd KernelSU && git rev-parse HEAD)" >> "$GITHUB_ENV"
 
       - name: Setup Java (solo para compilar el manager de SukiSU-Ultra)
