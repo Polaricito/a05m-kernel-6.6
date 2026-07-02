@@ -1,4 +1,3 @@
-
 name: Build A05m Kernel
  
 on:
@@ -54,14 +53,13 @@ jobs:
         run: |
           sed -i '/rsuntk\/KernelSU\/main\/kernel\/setup.sh/d' build_kernel.sh
  
-      - name: Integrar KernelSU-Next (estable, sin SUSFS)
+      - name: Integrar KernelSU-Next (tag v3.2.0, matchea manager público)
         if: ${{ inputs.root_provider == 'ksu-next-stable' }}
         working-directory: ./kernel-6.6
         run: |
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/refs/heads/dev/kernel/setup.sh" | bash -s dev || \
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/refs/heads/next/kernel/setup.sh" | bash -s next
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/refs/heads/dev/kernel/setup.sh" | bash -s v3.2.0
  
-          test -d KernelSU-Next || { echo "❌ Falló la integración de KernelSU-Next (ni dev ni next funcionaron)"; exit 1; }
+          test -d KernelSU-Next || { echo "❌ Falló la integración de KernelSU-Next"; exit 1; }
  
       - name: Integrar SukiSU-Ultra (tag v4.1.3, matchea manager público)
         if: ${{ inputs.root_provider == 'sukisu-ultra-v4.1.3' }}
