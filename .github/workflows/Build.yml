@@ -160,11 +160,3 @@ jobs:
           name: a05m-kernel-${{ inputs.root_provider }}-${{ github.run_number }}
           path: "*.zip"
           retention-days: 14
-
-      - name: Crear Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: build-${{ inputs.root_provider }}-${{ github.run_number }}
-          files: "*.zip"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
