@@ -139,7 +139,8 @@ jobs:
           cd manager
           chmod +x gradlew
           ./gradlew assembleRelease -x signReleaseBundle --warning-mode all --stacktrace \
-            -Dorg.gradle.warning.mode=none
+            -Dorg.gradle.warning.mode=none \
+            -Dorg.gradle.java.home=$JAVA_HOME
           find . -name "*.apk"
 
       - name: Subir manager APK (KernelSU-Next)
@@ -173,7 +174,8 @@ jobs:
           cd manager
           chmod +x gradlew
           ./gradlew assembleRelease -x signReleaseBundle --warning-mode all --stacktrace \
-            -Dorg.gradle.warning.mode=none
+            -Dorg.gradle.warning.mode=none \
+            -Dorg.gradle.java.home=$JAVA_HOME
           find . -name "*.apk"
 
       - name: Subir manager APK
