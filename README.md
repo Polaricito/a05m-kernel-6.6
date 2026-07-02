@@ -1,7 +1,8 @@
 Samsung A05 (A055F/M), One UI 7, Android 15, 6.6 Kernel Source
 - KernelSU-Next Included
+- SukiSU-Ultra Included
 
-I recommend forking and building a new version with Actions in case of an update
+I recommend forking and building a new version with Actions in case of an update (just take around a hour)
 
 build requirement?
 - know how to operate & use linux CLI
