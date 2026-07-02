@@ -83,13 +83,13 @@ jobs:
           }
           
           # Array de URLs de fuentes alternativas (prioridad)
-          declare -a SOURCES=(
-            "https://drive.google.com/uc?id=1vsQfRgdNHlD0md9tF7j5fpkL_17whzbH"
-            # Reemplaza con tu URL de Dropbox (sin parámetros, se agregan automáticamente)
-            # "https://www.dropbox.com/s/your-file-id/toolchain.tar.gz"
-            # Reemplaza con tu URL genérica/S3/etc
-            # "https://your-s3-bucket.s3.amazonaws.com/toolchain.tar.gz"
-          )
+           # Array de URLs de fuentes alternativas (prioridad)
+           declare -a SOURCES=(
+             "https://drive.google.com/uc?id=1vsQfRgdNHlD0md9tF7j5fpkL_17whzbH"
+             "https://www.dropbox.com/s/YOUR-FILE-ID/toolchain.tar.gz"
+             "https://your-s3-bucket.s3.amazonaws.com/toolchain.tar.gz"
+             "https://github.com/YOUR-RELEASES-URL/toolchain.tar.gz"
+           )
           
           # Intentar descargar desde cada fuente
           downloaded=false
