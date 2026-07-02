@@ -77,7 +77,7 @@ jobs:
           git checkout "$KSUN_COMMIT"
           cd manager
           chmod +x gradlew
-          ./gradlew assembleRelease -x signReleaseBundle  # Saltar firmado si no esta configurado
+          ./gradlew assembleRelease -x signReleaseBundle --warning-mode all --stacktrace
           find . -name "*.apk"
 
       - name: Subir manager APK (KernelSU-Next)
@@ -110,7 +110,7 @@ jobs:
           git checkout "$SUKISU_COMMIT"
           cd manager
           chmod +x gradlew
-          ./gradlew assembleRelease -x signReleaseBundle  # Saltar firmado si no esta configurado
+          ./gradlew assembleRelease -x signReleaseBundle --warning-mode all --stacktrace
           find . -name "*.apk"
 
       - name: Subir manager APK
