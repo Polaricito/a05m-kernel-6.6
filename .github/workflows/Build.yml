@@ -182,6 +182,36 @@ jobs:
           EOF
           fi
 
+      - name: Configurar AnyKernel3 (device check + nombre de zip según variante)
+        run: |
+          if [ "${{ inputs.root_provider }}" == "sukisu-ultra-v4.1.3" ]; then
+            TAG="sukisu-susfs"
+          else
+            TAG="ksun"
+          fi
+          echo "🏷️ Tag de variante: $TAG"
+
+          test -d "AnyKernel3" || { echo "❌ No se encontró la carpeta AnyKernel3 en la raíz del repo"; exit 1; }
+          test -f "AnyKernel3/anykernel.sh" || { echo "❌ No se encontró AnyKernel3/anykernel.sh"; exit 1; }
+
+          sed -i "s/^ZIPNAME=\"a05m-6.6-kernel\"/ZIPNAME=\"a05m-6.6-kernel-${TAG}\"/" build_kernel.sh
+          grep '^ZIPNAME=' build_kernel.sh
+
+          echo "🔒 Activando devicecheck en AnyKernel3 (estaba en 0, sin device.name -> flasheaba en cualquier equipo)"
+          AK3_SH="AnyKernel3/anykernel.sh"
+          sed -i 's/^do.devicecheck=0/do.devicecheck=1/' "$AK3_SH"
+          sed -i 's/^device.name1=$/device.name1=a05m/' "$AK3_SH"
+          grep -E '^do.devicecheck=|^device.name1=' "$AK3_SH"
+
+          CFG="./kernel/kernel_device_modules-6.6/kernel/configs/mt6768_overlay.config"
+          echo "📋 Config KSU/SUSFS que se va a compilar:"
+          grep -E "CONFIG_KSU(=|_SUSFS)" "$CFG" || echo "⚠️ No se encontraron flags CONFIG_KSU en $CFG"
+
+          if [ "${{ inputs.root_provider }}" == "sukisu-ultra-v4.1.3" ] && ! grep -q "CONFIG_KSU_SUSFS=y" "$CFG"; then
+            echo "❌ Se eligió SukiSU-Ultra pero CONFIG_KSU_SUSFS no quedó habilitado, abortando"
+            exit 1
+          fi
+
       - name: Cache de Bazel
         uses: actions/cache@v4
         with:
@@ -205,3 +235,4 @@ jobs:
           name: a05m-kernel-${{ inputs.root_provider }}-${{ github.run_number }}
           path: "*.zip"
           retention-days: 14
+          
