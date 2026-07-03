@@ -143,25 +143,33 @@ jobs:
           PATCH_50=$(ls $PATCH_DIR/50_add_susfs_in_*.patch | head -n 1)
           test -n "$PATCH_50" || { echo "❌ No se encontró parche 50_add_susfs_in_*.patch"; exit 1; }
           
-          patch -p1 --forward < "$PATCH_50" || echo "⚠️ Algunos hunks del parche 50 fallaron debido a código de MediaTek/Samsung. Iniciando inyección manual..."
+          patch -p1 --forward < "$PATCH_50" || echo "⚠️ Algunos hunks del parche 50 fallaron. Iniciando inyección manual a prueba de balas..."
 
-          # --- INICIO DE AUTO-REPARACIÓN DE PATCH DRIFT ---
-          echo "🛠️ Inyectando manualmente los hunks rechazados de SUSFS..."
+          # --- INICIO DE AUTO-REPARACIÓN BLINDADA ---
+          echo "🛠️ Inyectando dependencias base de SUSFS..."
           
-          # mm/memory.c
-          sed -i '/#include <linux\/zswap.h>/a #ifdef CONFIG_KSU_SUSFS_SUS_MAP\n#include <linux\/susfs_def.h>\n#endif \/\/ #ifdef CONFIG_KSU_SUSFS_SUS_MAP' mm/memory.c
+          # 1. Asegurar la inclusión de susfs_def.h en el primer include de linux de todos los archivos afectados
+          for f in mm/memory.c fs/namespace.c fs/open.c fs/proc/base.c fs/exec.c; do
+            if ! grep -q "linux/susfs_def.h" "$f"; then
+              sed -i '0,/#include <linux\//s//#include <linux\/susfs_def.h>\n&/' "$f"
+            fi
+          done
           
-          # fs/namespace.c
-          sed -i '/#include <linux\/mnt_idmapping.h>/a #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT\n#include <linux\/susfs_def.h>\n#endif \/\/ #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT' fs/namespace.c
-          sed -i '/#include <trace\/hooks\/fs.h>/a #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT\nextern bool susfs_is_current_ksu_domain(void);\nextern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;\n#define CL_COPY_MNT_NS BIT(25) \/* used by copy_mnt_ns() *\/\n#endif \/\/ #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT' fs/namespace.c
+          # 2. Inyectar macros y externs
+          if ! grep -q "susfs_is_current_ksu_domain" fs/namespace.c; then
+            sed -i '/#include <linux\/susfs_def.h>/a #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT\nextern bool susfs_is_current_ksu_domain(void);\nextern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;\n#define CL_COPY_MNT_NS BIT(25)\n#endif' fs/namespace.c
+          fi
           
-          # fs/open.c (Inyección de ksu_handle_faccessat)
-          sed -i '/static long do_faccessat(/i #ifdef CONFIG_KSU_SUSFS\nextern struct static_key_true ksu_su_compat_enabled;\nextern bool __ksu_is_allow_uid_for_current(uid_t uid);\nextern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode, int *flags);\n#endif\n' fs/open.c
+          if ! grep -q "ksu_handle_faccessat" fs/open.c; then
+            sed -i '/#include <linux\/susfs_def.h>/a #ifdef CONFIG_KSU_SUSFS\nextern struct static_key_true ksu_su_compat_enabled;\nextern bool __ksu_is_allow_uid_for_current(uid_t uid);\nextern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode, int *flags);\n#endif' fs/open.c
+          fi
           
-          # fs/open.c (Inyección de redirección OPEN_REDIRECT)
-          sed -i '/fd = get_unused_fd_flags(how->flags);/a #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT\nretry:\n#endif \/\/ #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT' fs/open.c
+          if ! grep -q "retry:" fs/open.c; then
+            sed -i '/fd = get_unused_fd_flags(how->flags);/a #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT\nretry:\n#endif' fs/open.c
+          fi
           
-          sed -i '/struct file \*f = do_filp_open(dfd, tmp, &op);/a \
+          if ! grep -q "susfs_open_redirect_spoof_do_sys_openat" fs/open.c; then
+            sed -i '/struct file \*f = do_filp_open(dfd, tmp, &op);/a \
           #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT\n\
           \t\tif (!is_inode_open_redirect && f && !IS_ERR(f)) {\n\
           \t\t\tstruct inode *inode = file_inode(f);\n\
@@ -176,16 +184,15 @@ jobs:
           \t\t\t\t}\n\
           \t\t\t}\n\
           \t\t}\n\
-          #endif \/\/ #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT' fs/open.c
+          #endif' fs/open.c
+          fi
           
-          # fs/proc/base.c
-          sed -i '/#include <linux\/dma-buf.h>/a #if defined(CONFIG_KSU_SUSFS_SUS_MAP) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)\n#include <linux\/susfs_def.h>\n#endif \/\/ #if defined(CONFIG_KSU_SUSFS_SUS_MAP) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)' fs/proc/base.c
-          
-          # fs/exec.c
-          sed -i '/static int do_execveat_common(/i #ifdef CONFIG_KSU_SUSFS\nextern struct static_key_true ksu_su_compat_enabled;\nextern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;\nextern bool __ksu_is_allow_uid_for_current(uid_t uid);\nextern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv, void *envp, int *flags);\nextern int ksu_handle_execveat_sucompat(int *fd, struct filename **filename_ptr, void *argv, void *envp, int *flags);\n#endif\n' fs/exec.c
+          if ! grep -q "ksu_handle_execveat" fs/exec.c; then
+            sed -i '/#include <linux\/susfs_def.h>/a #ifdef CONFIG_KSU_SUSFS\nextern struct static_key_true ksu_su_compat_enabled;\nextern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;\nextern bool __ksu_is_allow_uid_for_current(uid_t uid);\nextern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv, void *envp, int *flags);\nextern int ksu_handle_execveat_sucompat(int *fd, struct filename **filename_ptr, void *argv, void *envp, int *flags);\n#endif' fs/exec.c
+          fi
 
           echo "✅ Auto-reparación completada con éxito."
-          # --- FIN DE AUTO-REPARACIÓN ---
+          # --- FIN DE AUTO-REPARACIÓN BLINDADA ---
 
           if ls $PATCH_DIR/51_susfs_add_hook_in_*.patch 1> /dev/null 2>&1; then
             patch -p1 --forward < $(ls $PATCH_DIR/51_susfs_add_hook_in_*.patch | head -n 1) || {
