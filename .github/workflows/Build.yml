@@ -214,6 +214,18 @@ jobs:
 
           grep -q "susfs" fs/Makefile || { echo "❌ El parche 50 no modificó fs/Makefile como se esperaba, abortando en vez de inyectar a mano"; exit 1; }
 
+          echo "🔄 Sincronizando drivers/kernelsu/ con el SukiSU-Ultra ya parcheado con SUSFS"
+          echo "   (drivers/kernelsu/ es una copia vieja pre-vendorizada en el repo base — es la que Bazel realmente compila,"
+          echo "    ./KernelSU/ es solo staging donde acabamos de parchear. Hay que reemplazar una con la otra.)"
+          if [ ! -d "drivers/kernelsu" ]; then
+            echo "⚠️ No existe drivers/kernelsu, nada que sincronizar (¿la estructura del repo cambió?)"
+          else
+            rm -rf drivers/kernelsu
+            cp -r KernelSU/kernel drivers/kernelsu
+            grep -q "susfs_init()" drivers/kernelsu/core/init.c || { echo "❌ La sincronización no dejó susfs_init() en drivers/kernelsu/core/init.c, algo salió mal"; exit 1; }
+            echo "✅ drivers/kernelsu/ actualizado con el driver parcheado"
+          fi
+
       - name: Fijar restricciones del compilador Clang
         working-directory: ./kernel-6.6
         run: |
