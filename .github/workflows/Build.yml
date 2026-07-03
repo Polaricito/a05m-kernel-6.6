@@ -141,10 +141,10 @@ jobs:
             # que es la única línea estable entre las distintas refactorizaciones
             # que ha tenido init.c.
             sed -i '/ksu_feature_init();/i\
-#ifdef CONFIG_KSU_SUSFS\
-    susfs_init();\
-#endif // #ifdef KSU_SUSFS\
-' "$INIT_C"
+          #ifdef CONFIG_KSU_SUSFS\
+              susfs_init();\
+          #endif // #ifdef KSU_SUSFS\
+          ' "$INIT_C"
             grep -q "susfs_init()" "$INIT_C" || { echo "❌ La inyección manual de susfs_init() falló"; exit 1; }
             echo "✅ susfs_init() inyectado correctamente en init.c"
           else
