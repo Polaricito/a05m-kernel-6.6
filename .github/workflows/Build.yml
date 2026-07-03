@@ -55,7 +55,7 @@ jobs:
         run: |
           sed -i '/rsuntk\/KernelSU\/main\/kernel\/setup.sh/d' build_kernel.sh
 
-      - name: Integrar KernelSU-Next (tag v3.2.0)
+      - name: Integrar KernelSU-Next (tag v3.2.0, matchea manager público)
         if: ${{ inputs.root_provider == 'ksu-next-stable' }}
         working-directory: ./kernel-6.6
         run: |
@@ -63,14 +63,14 @@ jobs:
           test -d KernelSU-Next || { echo "❌ Falló la integración de KernelSU-Next"; exit 1; }
           echo "KSUN_COMMIT=$(cd KernelSU-Next && git rev-parse HEAD)" >> "$GITHUB_ENV"
 
-      - name: Setup Java (KSUN)
+      - name: Setup Java (solo para compilar el manager de KernelSU-Next)
         if: ${{ inputs.root_provider == 'ksu-next-stable' }}
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 21
 
-      - name: Compilar manager de KernelSU-Next
+      - name: Compilar manager de KernelSU-Next (mismo commit que el kernel)
         if: ${{ inputs.root_provider == 'ksu-next-stable' }}
         run: |
           git clone https://github.com/KernelSU-Next/KernelSU-Next.git ksun-manager-src
@@ -82,7 +82,7 @@ jobs:
           ./gradlew assembleRelease
           find . -name "*.apk"
 
-      - name: Subir manager APK (KSUN)
+      - name: Subir manager APK (KernelSU-Next)
         if: ${{ inputs.root_provider == 'ksu-next-stable' }}
         uses: actions/upload-artifact@v4
         with:
@@ -90,48 +90,48 @@ jobs:
           path: ksun-manager-src/manager/**/*.apk
           retention-days: 14
 
-      # --- INICIO CORRECCIONES SUKISU Y SUSFS 6.6 ---
-
-      - name: Integrar SukiSU-Ultra (Fijado a tag v4.1.3 estable)
+      - name: Integrar SukiSU-Ultra (tag v4.1.3, matchea manager público)
         if: ${{ inputs.root_provider == 'sukisu-ultra-v4.1.3' }}
         working-directory: ./kernel-6.6
         run: |
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s v4.1.3
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s susfs-main
           echo "SUKISU_COMMIT=$(cd KernelSU && git rev-parse HEAD)" >> "$GITHUB_ENV"
 
-      - name: Integrar parches SUSFS al código del Kernel (Para GKI 6.6)
+      - name: Integrar parches SUSFS al código del Kernel (Rama GKI 6.6)
         if: ${{ inputs.root_provider == 'sukisu-ultra-v4.1.3' }}
         working-directory: ./kernel-6.6
         run: |
-          echo "📥 Clonando repositorio de SUSFS..."
-          git clone https://gitlab.com/simonpunk/susfs4ksu.git ../susfs4ksu
+          echo "📥 Clonando repositorio de SUSFS (Rama gki-android15-6.6)..."
+          git clone -b gki-android15-6.6 https://gitlab.com/simonpunk/susfs4ksu.git ../susfs4ksu
           
           echo "📂 Copiando archivos de SUSFS al kernel..."
           cp -r ../susfs4ksu/kernel_patches/fs/* ./fs/
           cp -r ../susfs4ksu/kernel_patches/include/linux/* ./include/linux/
           
-          echo "🩹 Aplicando parches de SUSFS específicos para KERNEL 6.6..."
-          # Apuntamos a la carpeta de 6.6
-          PATCH_DIR="../susfs4ksu/kernel_patches/kernel_6.6"
+          echo "🩹 Aplicando parches de SUSFS..."
+          PATCH_DIR="../susfs4ksu/kernel_patches"
           
-          # Buscamos los parches de 6.6 con comodines por si el nombre varía ligeramente en el repo
           patch -p1 --forward < $(ls $PATCH_DIR/50_add_susfs_in_*.patch | head -n 1) || echo "⚠️ Error en parche 50"
-          patch -p1 --forward < $(ls $PATCH_DIR/51_susfs_add_hook_in_*.patch | head -n 1) || echo "⚠️ Error en parche 51"
           
-          # HACK VITAL PARA KERNEL 6.6: 
+          if ls $PATCH_DIR/51_susfs_add_hook_in_*.patch 1> /dev/null 2>&1; then
+            patch -p1 --forward < $(ls $PATCH_DIR/51_susfs_add_hook_in_*.patch | head -n 1) || echo "⚠️ Error en parche 51"
+          else
+            echo "ℹ️ Parche 51 no encontrado, los hooks probablemente estén unificados en el parche 50."
+          fi
+          
           if ! grep -q "susfs" fs/Makefile; then
             echo "Inyectando susfs.o en fs/Makefile manualmente..."
             echo "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" >> fs/Makefile
           fi
 
-      - name: Setup Java (SukiSU)
+      - name: Setup Java (solo para compilar el manager de SukiSU-Ultra)
         if: ${{ inputs.root_provider == 'sukisu-ultra-v4.1.3' }}
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 21
 
-      - name: Compilar manager de SukiSU-Ultra
+      - name: Compilar manager de SukiSU-Ultra (mismo commit que el kernel)
         if: ${{ inputs.root_provider == 'sukisu-ultra-v4.1.3' }}
         run: |
           git clone https://github.com/SukiSU-Ultra/SukiSU-Ultra.git suki-manager-src
@@ -143,7 +143,7 @@ jobs:
           ./gradlew assembleRelease
           find . -name "*.apk"
 
-      - name: Subir manager APK (SukiSU)
+      - name: Subir manager APK
         if: ${{ inputs.root_provider == 'sukisu-ultra-v4.1.3' }}
         uses: actions/upload-artifact@v4
         with:
@@ -151,7 +151,7 @@ jobs:
           path: suki-manager-src/manager/**/*.apk
           retention-days: 14
 
-      - name: Habilitar CONFIG_KSU y Bloque Completo SUSFS
+      - name: Habilitar CONFIG_KSU y SUSFS en overlay
         run: |
           CFG=$(grep -rl "CONFIG_KSU" --include="*.config" . 2>/dev/null | head -n1)
           if [ -z "$CFG" ]; then
@@ -181,8 +181,6 @@ jobs:
           CONFIG_KSU_SUSFS_ENABLE_LOG=y
           EOF
           fi
-
-      # --- FIN CORRECCIONES ---
 
       - name: Cache de Bazel
         uses: actions/cache@v4
