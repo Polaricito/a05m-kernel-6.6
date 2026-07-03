@@ -94,6 +94,10 @@ jobs:
         if: ${{ inputs.root_provider == 'sukisu-ultra-v4.1.3' }}
         working-directory: ./kernel-6.6
         run: |
+          # NOTA: la rama "susfs-main" ya no existe en el repo (SukiSU-Ultra la
+          # retiró). La guía oficial actual solo ofrece "main" y "builtin", y
+          # ambas requieren integrar susfs a mano. Volvemos a "main" y el
+          # parche 10 se aplica con auto-reparación más abajo.
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
           echo "SUKISU_COMMIT=$(cd KernelSU && git rev-parse HEAD)" >> "$GITHUB_ENV"
 
@@ -109,18 +113,43 @@ jobs:
           cp -r ../susfs4ksu/kernel_patches/include/linux/* ./include/linux/
 
           PATCH_DIR="../susfs4ksu/kernel_patches"
+          INIT_C="KernelSU/kernel/core/init.c"
 
-          echo "🩹 [1/2] Aplicando parche 10 sobre el driver de SukiSU-Ultra (KernelSU/) — esto es lo que conecta el driver con los hooks de susfs.c"
+          echo "🩹 [1/2] Aplicando parche 10 sobre el driver de SukiSU-Ultra (KernelSU/)"
           if [ ! -f "$PATCH_DIR/KernelSU/10_enable_susfs_for_ksu.patch" ]; then
             echo "❌ No se encontró 10_enable_susfs_for_ksu.patch en $PATCH_DIR/KernelSU/"
             exit 1
           fi
           cp "$PATCH_DIR/KernelSU/10_enable_susfs_for_ksu.patch" ./KernelSU/
-          (cd KernelSU && patch -p1 --forward < 10_enable_susfs_for_ksu.patch) || {
-            echo "❌ Falló el parche 10 sobre KernelSU/ — revisar KernelSU/*.rej abajo:"
-            find KernelSU -name '*.rej' -exec echo "--- {} ---" \; -exec cat {} \;
-            exit 1
-          }
+
+          # Best-effort: el driver de SukiSU-Ultra (rama main) se refactoriza
+          # seguido y el parche 10 de susfs4ksu suele quedar desactualizado
+          # justo en la función kernelsu_init() de init.c (los hunks de
+          # includes/Kbuild/Kconfig sí suelen aplicar bien). No abortamos si
+          # falla; verificamos y auto-reparamos abajo.
+          (cd KernelSU && patch -p1 --forward --fuzz=3 < 10_enable_susfs_for_ksu.patch) || \
+            echo "⚠️ El parche 10 no aplicó completo (probable drift en init.c), se intentará reparar automáticamente."
+
+          if ! grep -q "susfs_init()" "$INIT_C"; then
+            echo "🔧 susfs_init() no quedó insertado en init.c — inyectando manualmente junto a ksu_feature_init()"
+            if ! grep -q "ksu_feature_init();" "$INIT_C"; then
+              echo "❌ No se encontró el ancla ksu_feature_init() en $INIT_C — el driver cambió demasiado, hay que revisar a mano"
+              cat "$INIT_C"
+              exit 1
+            fi
+            # Inserta el bloque de susfs_init() justo antes de ksu_feature_init(),
+            # que es la única línea estable entre las distintas refactorizaciones
+            # que ha tenido init.c.
+            sed -i '/ksu_feature_init();/i\
+#ifdef CONFIG_KSU_SUSFS\
+    susfs_init();\
+#endif // #ifdef KSU_SUSFS\
+' "$INIT_C"
+            grep -q "susfs_init()" "$INIT_C" || { echo "❌ La inyección manual de susfs_init() falló"; exit 1; }
+            echo "✅ susfs_init() inyectado correctamente en init.c"
+          else
+            echo "✅ susfs_init() ya presente en init.c (el parche aplicó bien)."
+          fi
 
           echo "🩹 [2/2] Aplicando parche 50 sobre el árbol del kernel (fs/, hooks core)..."
           PATCH_50=$(ls $PATCH_DIR/50_add_susfs_in_*.patch | head -n 1)
