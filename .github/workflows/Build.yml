@@ -262,41 +262,12 @@ jobs:
 
           grep -q "susfs" fs/Makefile || { echo "❌ El parche 50 no modificó fs/Makefile como se esperaba, abortando en vez de inyectar a mano"; exit 1; }
 
-          echo "🔄 Sincronizando drivers/kernelsu/ con el SukiSU-Ultra ya parcheado con SUSFS"
-          echo "   (drivers/kernelsu/ es una copia vieja pre-vendorizada en el repo base — es la que Bazel realmente compila,"
-          echo "    ./KernelSU/ es solo staging donde acabamos de parchear. Hay que reemplazar una con la otra.)"
-          if [ ! -d "drivers/kernelsu" ]; then
-            echo "⚠️ No existe drivers/kernelsu, nada que sincronizar (¿la estructura del repo cambió?)"
-          else
-            rm -rf drivers/kernelsu
-            cp -r KernelSU/kernel drivers/kernelsu
-            grep -q "susfs_init()" drivers/kernelsu/core/init.c || { echo "❌ La sincronización no dejó susfs_init() en drivers/kernelsu/core/init.c, algo salió mal"; exit 1; }
-            echo "✅ drivers/kernelsu/ actualizado con el driver parcheado"
-
-            echo "🔧 Reparando includes relativos 'uapi/*.h' rotos al mover el driver desde ./KernelSU a drivers/kernelsu"
-            for header_name in $(grep -rhoE '#include[[:space:]]+"uapi/[A-Za-z0-9_]+\.h"' drivers/kernelsu | sed -E 's#.*uapi/([A-Za-z0-9_]+\.h)".*#\1#' | sort -u); do
-              # Preferimos la copia que YA vive dentro de una carpeta uapi/ real (es la versión
-              # pública/canónica). Si no existe ninguna así, recién ahí caemos a cualquier
-              # archivo con ese nombre en el árbol (mejor que nada, pero puede ser el interno).
-              SRC_HEADER=$(find drivers/kernelsu -path "*/uapi/$header_name" | head -n 1)
-              if [ -z "$SRC_HEADER" ]; then
-                SRC_HEADER=$(find drivers/kernelsu -name "$header_name" | head -n 1)
-                echo "   ⚠️ $header_name no tiene una copia dentro de uapi/ en ningún lado — usando $SRC_HEADER como mejor esfuerzo (puede ser el header interno, no el público)"
-              fi
-              if [ -z "$SRC_HEADER" ]; then
-                echo "   ⚠️ No se encontró $header_name en drivers/kernelsu, revisar a mano"
-                continue
-              fi
-              echo "   $header_name -> $SRC_HEADER"
-              for including_file in $(grep -rl "uapi/$header_name" drivers/kernelsu); do
-                dir=$(dirname "$including_file")
-                # no reemplazar el uapi/ que ya es la fuente real
-                [ "$dir/uapi/$header_name" = "$SRC_HEADER" ] && continue
-                mkdir -p "$dir/uapi"
-                cp "$SRC_HEADER" "$dir/uapi/$header_name"
-              done
-            done
-          fi
+          echo "ℹ️ drivers/kernelsu ya es un symlink a ../KernelSU/kernel creado por el propio setup.sh de SukiSU-Ultra."
+          echo "   No lo tocamos: reemplazarlo por una copia real rompe la resolución de '../uapi' que usan"
+          echo "   los headers internos (policy/app_profile.h, etc.) para encontrar KernelSU/uapi/."
+          ls -la drivers/kernelsu 2>/dev/null || echo "⚠️ drivers/kernelsu no existe o no es lo esperado, revisar"
+          grep -q "susfs_init()" drivers/kernelsu/core/init.c || { echo "❌ drivers/kernelsu/core/init.c no tiene susfs_init(), el symlink no está apuntando a KernelSU/kernel parcheado"; exit 1; }
+          echo "✅ drivers/kernelsu (vía symlink) refleja el driver ya parcheado con SUSFS"
 
       - name: Fijar restricciones del compilador Clang
         working-directory: ./kernel-6.6
