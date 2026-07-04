@@ -267,7 +267,12 @@ jobs:
           echo "   los headers internos (policy/app_profile.h, etc.) para encontrar KernelSU/uapi/."
           ls -la drivers/kernelsu 2>/dev/null || echo "⚠️ drivers/kernelsu no existe o no es lo esperado, revisar"
           grep -q "susfs_init()" drivers/kernelsu/core/init.c || { echo "❌ drivers/kernelsu/core/init.c no tiene susfs_init(), el symlink no está apuntando a KernelSU/kernel parcheado"; exit 1; }
-          echo "✅ drivers/kernelsu (vía symlink) refleja el driver ya parcheado con SUSFS"
+          echo "✅ drivers/kernelsu (vía symlink) refleja el driver ya parcheado con SUSFS, justo después de parchear"
+
+          echo "🔎 Diagnóstico extra: ¿drivers/kernelsu está registrado como submódulo de git o como dependencia externa de Bazel?"
+          echo "   (si Bazel lo re-materializa desde ahí al compilar, nuestro symlink/parche se pierde antes de que 'make' lo compile)"
+          find .. -maxdepth 3 -name ".gitmodules" -exec echo "--- {} ---" \; -exec cat {} \; 2>/dev/null
+          grep -rn "kernelsu" --include="WORKSPACE*" --include="MODULE.bazel*" --include="*.bzl" --include="BUILD.bazel" .. 2>/dev/null | grep -vi "drivers/kernelsu/" | head -50
 
       - name: Fijar restricciones del compilador Clang
         working-directory: ./kernel-6.6
@@ -308,6 +313,16 @@ jobs:
           CONFIG_KSU_SUSFS_SUS_MAP=y
           EOF
           fi
+
+      - name: Verificar que el parche de drivers/kernelsu sobrevivió hasta este punto
+        if: ${{ inputs.root_provider == 'sukisu-ultra-v4.1.3' }}
+        working-directory: ./kernel-6.6
+        run: |
+          echo "🔎 Justo antes de compilar — ¿drivers/kernelsu todavía tiene susfs_init()?"
+          ls -la drivers/kernelsu
+          grep -q "susfs_init()" drivers/kernelsu/core/init.c \
+            && echo "✅ Sigue parcheado justo antes de 'Compilar' — si se rompe, es Bazel/make durante la compilación, no un paso previo de CI" \
+            || echo "❌ YA se perdió antes de compilar — algo entre el parcheo y este punto (cache de Bazel restaurada, etc.) lo revirtió"
 
       - name: Cache de Bazel
         uses: actions/cache@v4
