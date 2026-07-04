@@ -334,6 +334,9 @@ jobs:
 
       - name: Compilar
         run: |
+          echo "📄 Contenido completo de build_kernel.sh (para ver si resetea submódulos/git antes de invocar bazel/make):"
+          cat -n build_kernel.sh
+          echo "───────────────────────────────────────────"
           chmod +x build_kernel.sh
           bash build_kernel.sh
 
