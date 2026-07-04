@@ -101,6 +101,12 @@ jobs:
           find . -maxdepth 3 -type l -exec ls -la {} \; 2>/dev/null
           echo "🔎 ¿Existe alguna carpeta/archivo 'uapi' en lo que acaba de clonar SukiSU-Ultra?"
           find KernelSU -iname "*uapi*" 2>/dev/null || echo "   (ninguna carpeta ni archivo con 'uapi' en el nombre)"
+          echo "🔎 Contenido completo de KernelSU/kernel/include/uapi (si existe):"
+          find KernelSU/kernel/include/uapi -type f 2>/dev/null || echo "   (no existe)"
+          echo "🔎 Contenido completo de KernelSU/uapi (si existe):"
+          find KernelSU/uapi -type f 2>/dev/null || echo "   (no existe)"
+          echo "🔎 TODAS las ubicaciones de nuestros 5 headers problemáticos en todo KernelSU/:"
+          find KernelSU \( -iname "app_profile.h" -o -iname "feature.h" -o -iname "selinux.h" -o -iname "sulog.h" -o -iname "supercall.h" \) 2>/dev/null
           echo "🔎 Contenido de KernelSU/kernel/Makefile (para ver flags -I y wiring real):"
           cat KernelSU/kernel/Makefile 2>/dev/null || echo "   (no existe KernelSU/kernel/Makefile)"
 
@@ -355,3 +361,4 @@ jobs:
           name: a05m-kernel-${{ inputs.root_provider }}-${{ github.run_number }}
           path: "*.zip"
           retention-days: 14
+          
