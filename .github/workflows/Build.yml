@@ -364,7 +364,12 @@ jobs:
 
           grep -q "susfs" fs/Makefile || { echo "❌ El parche 50 no modificó fs/Makefile como se esperaba, abortando en vez de inyectar a mano"; exit 1; }
 
-          echo "ℹ️ drivers/kernelsu ya es un symlink a ../KernelSU/kernel creado por el propio setup.sh de SukiSU-Ultra."
+          echo "🔎 Diagnóstico: ¿cómo está wireado infra/symbol_resolver y hook/syscall_hook en el Makefile del driver?"
+          echo "   (buscamos esto porque 'find_kernel_symbol_exact' da undefined symbol al linkear —"
+          echo "    probablemente porque symbol_resolver.c sigue compilándose aunque ya no lo llame nadie)"
+          grep -n "symbol_resolver\|syscall_hook" KernelSU/kernel/Makefile KernelSU/kernel/Kbuild 2>/dev/null
+          echo "🔎 ¿find_kernel_symbol_exact aparece definida en algún .c de todo KernelSU/?"
+          grep -rn "find_kernel_symbol_exact" KernelSU/ 2>/dev/null | head -20
           echo "   No lo tocamos: reemplazarlo por una copia real rompe la resolución de '../uapi' que usan"
           echo "   los headers internos (policy/app_profile.h, etc.) para encontrar KernelSU/uapi/."
           ls -la drivers/kernelsu 2>/dev/null || echo "⚠️ drivers/kernelsu no existe o no es lo esperado, revisar"
