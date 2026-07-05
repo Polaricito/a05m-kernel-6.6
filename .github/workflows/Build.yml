@@ -384,6 +384,19 @@ jobs:
           echo "🛠️ Inyectando pragma para ignorar errores estrictos de array-bounds en signal.h..."
           sed -i '1i #pragma GCC diagnostic ignored "-Warray-bounds"' include/linux/signal.h
 
+          if [ "${{ inputs.root_provider }}" == "sukisu-ultra-v4.1.3" ]; then
+            SELINUX_HIDE_C="KernelSU/kernel/feature/selinux_hide.c"
+            if [ -f "$SELINUX_HIDE_C" ]; then
+              echo "🛠️ Inyectando pragma para ignorar -Wpointer-bool-conversion en selinux_hide.c"
+              echo "   (el código chequea 'if (nombre_de_funcion)' en vez de un puntero a función,"
+              echo "    lo que Clang moderno marca como error con -Werror; no es algo que debamos"
+              echo "    reescribir a mano en código de SukiSU-Ultra que no es nuestro)"
+              sed -i '1i #pragma GCC diagnostic ignored "-Wpointer-bool-conversion"' "$SELINUX_HIDE_C"
+            else
+              echo "⚠️ No se encontró $SELINUX_HIDE_C, si aparece este error de nuevo revisar la ruta"
+            fi
+          fi
+
       - name: Habilitar CONFIG_KSU y SUSFS en overlay
         run: |
           CFG=$(grep -rl "CONFIG_KSU" --include="*.config" . 2>/dev/null | head -n1)
