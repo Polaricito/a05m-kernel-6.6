@@ -374,14 +374,15 @@ jobs:
           grep -rln "symbol_resolver" --include="Makefile" --include="Kbuild" KernelSU/ 2>/dev/null || echo "   (ningún Makefile/Kbuild en ninguna subcarpeta menciona symbol_resolver)"
           echo "🔎 Contenido de KernelSU/kernel/infra/Makefile (si existe):"
           cat KernelSU/kernel/infra/Makefile 2>/dev/null || echo "   (no existe)"
-          echo "🔎 ¿Hay algún flag KPM en el Kconfig del driver, y aparece 'infra' o 'kpm' condicionado a él?"
-          grep -n "KPM\|infra/\|kpm/" KernelSU/kernel/Kconfig KernelSU/kernel/Makefile 2>/dev/null || echo "   (sin coincidencias de KPM/infra/kpm en Kconfig/Makefile del driver)"
-          echo "🔎 ¿infra/symbol_resolver.c existe físicamente?"
-          ls -la KernelSU/kernel/infra/ 2>/dev/null || echo "   (no existe la carpeta infra/)"
-          echo "🔎 Contenido COMPLETO de KernelSU/kernel/Makefile (para ver el patrón real de wireado, sin adivinar palabras clave):"
-          cat -n KernelSU/kernel/Makefile 2>/dev/null || echo "   (no existe)"
-          echo "🔎 Contenido COMPLETO de KernelSU/kernel/Kbuild (si es distinto del Makefile):"
-          cat -n KernelSU/kernel/Kbuild 2>/dev/null || echo "   (no existe)"
+          echo "🔧 infra/symbol_resolver.o falta en kernelsu-objs del Kbuild (feature/uts_spoof.c lo necesita y sí está listado) — agregándolo"
+          KBUILD_FILE="KernelSU/kernel/Kbuild"
+          if [ -f "$KBUILD_FILE" ] && ! grep -q "infra/symbol_resolver.o" "$KBUILD_FILE"; then
+            sed -i '/infra\/su_mount_ns.o/a kernelsu-objs += infra/symbol_resolver.o' "$KBUILD_FILE"
+            grep -q "infra/symbol_resolver.o" "$KBUILD_FILE" || { echo "❌ No se pudo insertar infra/symbol_resolver.o en $KBUILD_FILE"; exit 1; }
+            echo "✅ infra/symbol_resolver.o agregado a kernelsu-objs"
+          else
+            echo "ℹ️ infra/symbol_resolver.o ya está en kernelsu-objs (o no existe el Kbuild), no hace falta tocar nada"
+          fi
           echo "   No lo tocamos: reemplazarlo por una copia real rompe la resolución de '../uapi' que usan"
           echo "   los headers internos (policy/app_profile.h, etc.) para encontrar KernelSU/uapi/."
           ls -la drivers/kernelsu 2>/dev/null || echo "⚠️ drivers/kernelsu no existe o no es lo esperado, revisar"
