@@ -272,7 +272,9 @@ jobs:
           echo "🔎 Diagnóstico extra: ¿drivers/kernelsu está registrado como submódulo de git o como dependencia externa de Bazel?"
           echo "   (si Bazel lo re-materializa desde ahí al compilar, nuestro symlink/parche se pierde antes de que 'make' lo compile)"
           find .. -maxdepth 3 -name ".gitmodules" -exec echo "--- {} ---" \; -exec cat {} \; 2>/dev/null
-          grep -rn "kernelsu" --include="WORKSPACE*" --include="MODULE.bazel*" --include="*.bzl" --include="BUILD.bazel" .. 2>/dev/null | grep -vi "drivers/kernelsu/" | head -50
+          grep -rn "kernelsu" --include="WORKSPACE*" --include="MODULE.bazel*" --include="*.bzl" --include="BUILD.bazel" --include="BUILD" .. 2>/dev/null | grep -vi "drivers/kernelsu/" | head -50
+          echo "🔎 ¿Hay algún otro script (fuera de nuestro build_kernel.sh) que mencione 'kernelsu' o 'KernelSU' y pueda re-ejecutar su propio setup?"
+          grep -rln "kernelsu\|KernelSU" --include="*.sh" --include="*.py" .. 2>/dev/null | grep -v "build_kernel.sh\|/KernelSU/\|drivers/kernelsu" | head -30
 
       - name: Fijar restricciones del compilador Clang
         working-directory: ./kernel-6.6
@@ -345,10 +347,20 @@ jobs:
         run: |
           ls -la *.zip || { echo "❌ No se generó ningún zip, revisar log de Compilar"; exit 1; }
 
-      - name: Subir artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: a05m-kernel-${{ inputs.root_provider }}-${{ github.run_number }}
-          path: "*.zip"
-          retention-days: 14
-          
+      - name: Diagnóstico post-mortem de drivers/kernelsu (corre siempre, incluso si falló Compilar)
+        if: always()
+        working-directory: ./kernel-6.6
+        run: |
+          echo "🔎 Estado de drivers/kernelsu DESPUÉS del intento de compilación:"
+          ls -la drivers/kernelsu 2>/dev/null || echo "   No existe / no se puede acceder"
+          if [ -L drivers/kernelsu ]; then
+            echo "   Es un symlink, apunta a: $(readlink drivers/kernelsu)"
+          elif [ -d drivers/kernelsu ]; then
+            echo "   Es un directorio real (no symlink)"
+          fi
+          echo "🔎 ¿Todavía tiene susfs_init()?"
+          grep -q "susfs_init()" drivers/kernelsu/core/init.c 2>/dev/null \
+            && echo "   ✅ Sigue con susfs_init() — el error de compilación no fue por reversión de este archivo" \
+            || echo "   ❌ Ya NO tiene susfs_init() — algo lo reescribió/reapuntó durante la compilación"
+          echo "🔎 ¿./KernelSU/kernel/core/init.c (el original que parcheamos) sigue intacto?"
+          grep -q "susfs_init()" KernelSU/kern
