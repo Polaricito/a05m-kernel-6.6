@@ -363,4 +363,13 @@ jobs:
             && echo "   ✅ Sigue con susfs_init() — el error de compilación no fue por reversión de este archivo" \
             || echo "   ❌ Ya NO tiene susfs_init() — algo lo reescribió/reapuntó durante la compilación"
           echo "🔎 ¿./KernelSU/kernel/core/init.c (el original que parcheamos) sigue intacto?"
-          grep -q "susfs_init()" KernelSU/kern
+          grep -q "susfs_init()" KernelSU/kernel/core/init.c 2>/dev/null \
+            && echo "   ✅ KernelSU/kernel/core/init.c sigue con susfs_init()" \
+            || echo "   ❌ Hasta el original en KernelSU/ perdió el parche"
+
+      - name: Subir artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: a05m-kernel-${{ inputs.root_provider }}-${{ github.run_number }}
+          path: "*.zip"
+          retention-days: 14
