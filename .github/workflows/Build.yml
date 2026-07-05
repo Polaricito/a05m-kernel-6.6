@@ -170,21 +170,24 @@ jobs:
               print("   ✅ init.c no tiene símbolos viejos, nada que completar")
               sys.exit(0)
 
-          # 0. Asegurar los includes de las funciones nuevas que vamos a llamar
-          lines = content.split("\n")
-          last_include_idx = None
-          for i, line in enumerate(lines[:60]):
-              if line.startswith("#include"):
-                  last_include_idx = i
-          if last_include_idx is not None:
-              to_add = []
-              if '"hook/setuid_hook.h"' not in content:
-                  to_add.append('#include "hook/setuid_hook.h"')
-              if '"feature/sucompat.h"' not in content:
-                  to_add.append('#include "feature/sucompat.h"')
-              for j, inc in enumerate(to_add):
-                  lines.insert(last_include_idx + 1 + j, inc)
-              content = "\n".join(lines)
+          # 0. Declarar extern directamente en vez de #include (el include con comillas desde
+          #    core/init.c busca relativo a core/, no a la raíz del driver — mismo problema
+          #    que tuvimos con uapi/*.h. Extern evita todo el lío de resolución de rutas.)
+          if "SUSFS_AUTOFIX_INIT_EXTERNS" not in content:
+              lines = content.split("\n")
+              last_include_idx = None
+              for i, line in enumerate(lines[:60]):
+                  if line.startswith("#include"):
+                      last_include_idx = i
+              if last_include_idx is not None:
+                  extern_block = [
+                      "/* SUSFS_AUTOFIX_INIT_EXTERNS */",
+                      "extern void ksu_sucompat_init(void);",
+                      "extern void ksu_setuid_hook_init(void);",
+                  ]
+                  for j, line in enumerate(extern_block):
+                      lines.insert(last_include_idx + 1 + j, line)
+                  content = "\n".join(lines)
 
           # 1. Borrar llamadas a funciones que ya no existen en esta versión (sin reemplazo)
           for func in ["ksu_init_symbol_resolver", "ksu_syscall_hook_init",
@@ -234,7 +237,10 @@ jobs:
           if remaining:
               print(f"   ❌ Todavía quedan símbolos viejos tras el fix: {remaining}")
               sys.exit(1)
-          print("   ✅ init.c completado: símbolos viejos eliminados, llamadas modernas insertadas")
+          if "extern void ksu_sucompat_init(void);" not in content or "extern void ksu_setuid_hook_init(void);" not in content:
+              print("   ❌ Las extern de ksu_sucompat_init/ksu_setuid_hook_init no quedaron insertadas")
+              sys.exit(1)
+          print("   ✅ init.c completado: símbolos viejos eliminados, llamadas modernas insertadas, externs agregadas")
           PYEOF
 
           echo "🩹 [2/2] Aplicando parche 50 sobre el árbol del kernel (fs/, hooks core)..."
