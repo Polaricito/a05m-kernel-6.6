@@ -242,6 +242,10 @@ jobs:
               sys.exit(1)
           print("   ✅ init.c completado: símbolos viejos eliminados, llamadas modernas insertadas, externs agregadas")
           PYEOF
+          echo "📋 Volcado real de las primeras 45 líneas de $INIT_C (para confirmar dónde quedaron las extern):"
+          sed -n '1,45p' "$INIT_C"
+          echo "📋 Todas las líneas con ksu_sucompat_init / ksu_setuid_hook_init en $INIT_C:"
+          grep -n "ksu_sucompat_init\|ksu_setuid_hook_init" "$INIT_C"
 
           echo "🩹 [2/2] Aplicando parche 50 sobre el árbol del kernel (fs/, hooks core)..."
           PATCH_50=$(ls $PATCH_DIR/50_add_susfs_in_*.patch | head -n 1)
