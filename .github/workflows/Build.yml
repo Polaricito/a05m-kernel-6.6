@@ -177,7 +177,14 @@ jobs:
               lines = content.split("\n")
               last_include_idx = None
               for i, line in enumerate(lines[:60]):
-                  if line.startswith("#include"):
+                  stripped = line.strip()
+                  # Frenar en el primer #if/#ifdef/#ifndef: no queremos insertar dentro de un
+                  # bloque condicional (p.ej. "#if defined(__x86_64__)" tiene sus propios
+                  # #include adentro que en un build ARM64 quedan compilados afuera por el
+                  # preprocesador, y ahí es literalmente donde se perdían nuestras extern).
+                  if stripped.startswith("#if"):
+                      break
+                  if stripped.startswith("#include"):
                       last_include_idx = i
               if last_include_idx is not None:
                   extern_block = [
@@ -242,8 +249,8 @@ jobs:
               sys.exit(1)
           print("   ✅ init.c completado: símbolos viejos eliminados, llamadas modernas insertadas, externs agregadas")
           PYEOF
-          echo "📋 Volcado real de las primeras 45 líneas de $INIT_C (para confirmar dónde quedaron las extern):"
-          sed -n '1,45p' "$INIT_C"
+          echo "📋 Volcado real de las primeras 60 líneas de $INIT_C (para confirmar dónde quedaron las extern):"
+          sed -n '1,60p' "$INIT_C"
           echo "📋 Todas las líneas con ksu_sucompat_init / ksu_setuid_hook_init en $INIT_C:"
           grep -n "ksu_sucompat_init\|ksu_setuid_hook_init" "$INIT_C"
 
