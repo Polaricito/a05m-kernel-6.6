@@ -9,7 +9,7 @@ on:
         options:
           - ksu-next-dev
           - sukisu-ultra-main
-        default: ksu-next-stable
+        default: ksu-next-dev
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
