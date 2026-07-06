@@ -56,7 +56,7 @@ jobs:
           sed -i '/rsuntk\/KernelSU\/main\/kernel\/setup.sh/d' build_kernel.sh
 
       - name: Integrate KernelSU-Next
-        if: ${{ inputs.root_provider == 'ksu-next-stable' }}
+        if: ${{ inputs.root_provider == 'ksu-next-dev' }}
         working-directory: ./kernel-6.6
         run: |
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/refs/heads/dev/kernel/setup.sh" | bash -s dev
