@@ -20,3 +20,5 @@ The build is gonna take around 1 hour
 After finish it would automatically compressed into a05m-kernel-*****.zip
 
 you need to flash it from custom recovery (TWRP, etc)
+
+thanks [Rsuntk](https://github.com/Theman-Fromfar/a05m-kernel-6.6) for the kernel repo
