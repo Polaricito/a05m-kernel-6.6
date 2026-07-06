@@ -21,4 +21,6 @@ After finish it would automatically compressed into a05m-kernel-*****.zip
 
 you need to flash it from custom recovery (TWRP, etc)
 
+Download the latest manager for [SukiSU](https://github.com/SukiSU-Ultra/SukiSU-Ultra/actions/workflows/build-manager.yml?query=branch%3Amain+is%3Asuccess) or [KernelSU Next](https://github.com/KernelSU-Next/KernelSU-Next/actions/workflows/build-manager.yml?query=branch%3Adev+is%3Asuccess)
+
 thanks [Theman-Fromfar](https://github.com/Theman-Fromfar/a05m-kernel-6.6) for the kernel repo
