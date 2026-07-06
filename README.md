@@ -12,7 +12,7 @@ how to build?
 - go to actions [here (From my repo, use yours)](https://github.com/Polaricito/a05m-kernel-6.6/actions/workflows/Build.yml)
 - Select "Run Workflow"
 - Select the root provider and run it, the file will upload to artifacts
-<img width="300" alt="image" src="https://github.com/user-attachments/assets/520daf1d-b626-4473-88dc-e3094c28e23e" />
+<img width="500" alt="image" src="https://github.com/user-attachments/assets/520daf1d-b626-4473-88dc-e3094c28e23e" />
 
 
 The build is gonna take around 1 hour
