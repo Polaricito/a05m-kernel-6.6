@@ -2,21 +2,21 @@ Samsung A05 (A055F/M), One UI 7, Android 15, 6.6 Kernel Source
 - KernelSU-Next Included
 - SukiSU-Ultra Included
 
-I recommend forking and building a new version with Actions in case of an update (just take around a hour)
-
 build requirement?
-- know how to operate & use linux CLI
-- some knowledge about kernel building
-- pc/laptop/device/VM running ubuntu or debian with at least 2 cores & 4GB ram allocated 
+- Github account
+- Some knowledge about Actions
+- pc/laptop/device/VM running a browser
 
 how to build?
-- clone this repo
-- download the toolchain from samsung open source [here (Samsung Web Page)](https://opensource.samsung.com/uploadSearch?searchValue=toolchain) or [here (Google Drive)](https://drive.google.com/file/d/1vsQfRgdNHlD0md9tF7j5fpkL_17whzbH/view?usp=sharing)
-- extract toolchain.tar.gz on the root of the kernel source
-- bash build_kernel.sh
+- fork this repo
+- go to actions [here (From my repo, use yours)](https://github.com/Polaricito/a05m-kernel-6.6/actions/workflows/Build.yml)
+- Select "Run Workflow"
+- Select the root provider and run it, the file will upload to artifacts
+<img width="300" alt="image" src="https://github.com/user-attachments/assets/520daf1d-b626-4473-88dc-e3094c28e23e" />
 
-First build is gonna take around 1-5 hours depend on your hardware configuration
 
-After finish it would automatically compressed into a05m-6.6-kernel-*****.zip
+The build is gonna take around 1 hour
+
+After finish it would automatically compressed into a05m-kernel-*****.zip
 
 you need to flash it from custom recovery (TWRP, etc)
