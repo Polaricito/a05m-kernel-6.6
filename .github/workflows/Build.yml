@@ -7,7 +7,7 @@ on:
         description: "Root solution"
         type: choice
         options:
-          - ksu-next-stable
+          - ksu-next-dev
           - sukisu-ultra-main
         default: ksu-next-stable
 
@@ -55,43 +55,16 @@ jobs:
         run: |
           sed -i '/rsuntk\/KernelSU\/main\/kernel\/setup.sh/d' build_kernel.sh
 
-      - name: Integrate KernelSU-Next (tag v3.2.0, matches the public manager)
+      - name: Integrate KernelSU-Next
         if: ${{ inputs.root_provider == 'ksu-next-stable' }}
         working-directory: ./kernel-6.6
         run: |
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/refs/heads/dev/kernel/setup.sh" | bash -s v3.2.0
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/refs/heads/dev/kernel/setup.sh" | bash -s dev
           test -d KernelSU-Next || { echo "KernelSU-Next integration failed"; exit 1; }
           echo "DRIVER_DIR=KernelSU-Next" >> "$GITHUB_ENV"
           echo "KSUN_COMMIT=$(cd KernelSU-Next && git rev-parse HEAD)" >> "$GITHUB_ENV"
 
-      - name: Set up Java (only needed to build the KernelSU-Next manager)
-        if: ${{ inputs.root_provider == 'ksu-next-stable' }}
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 21
-
-      - name: Build KernelSU-Next manager (same commit as the kernel)
-        if: ${{ inputs.root_provider == 'ksu-next-stable' }}
-        run: |
-          git clone https://github.com/KernelSU-Next/KernelSU-Next.git ksun-manager-src
-          cd ksun-manager-src
-          git checkout "$KSUN_COMMIT"
-          cd manager
-          echo "sdk.dir=$ANDROID_HOME" > local.properties
-          chmod +x gradlew
-          ./gradlew assembleRelease
-          find . -name "*.apk"
-
-      - name: Upload manager APK (KernelSU-Next)
-        if: ${{ inputs.root_provider == 'ksu-next-stable' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: ksun-manager-${{ github.run_number }}
-          path: ksun-manager-src/manager/**/*.apk
-          retention-days: 14
-
-      - name: Integrate SukiSU-Ultra (main branch, matches the public manager)
+      - name: Integrate SukiSU-Ultra 
         if: ${{ inputs.root_provider == 'sukisu-ultra-main' }}
         working-directory: ./kernel-6.6
         run: |
