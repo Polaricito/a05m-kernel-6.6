@@ -113,21 +113,26 @@ jobs:
           (cd "$DRIVER_DIR" && patch -p1 --forward --fuzz=3 < 10_enable_susfs_for_ksu.patch) || \
             echo "Patch 10 did not apply cleanly (likely driver drift), attempting automatic repair."
 
-          if ! grep -q "susfs_init()" "$INIT_C"; then
-            if ! grep -q "ksu_feature_init();" "$INIT_C"; then
-              echo "Anchor ksu_feature_init() not found in $INIT_C, the driver has changed too much to patch automatically"
-              cat "$INIT_C"
-              exit 1
-            fi
-            sed -i '/ksu_feature_init();/i\
+          if [ "$DRIVER_DIR" == "KernelSU" ]; then
+            # This repair sequence was built and verified specifically against SukiSU-Ultra's
+            # driver structure. Do not reuse it for other drivers without checking first —
+            # symbol names that are dead code in one driver (e.g. ksu_late_loaded) can still
+            # be live, in-use variables in another.
+            if ! grep -q "susfs_init()" "$INIT_C"; then
+              if ! grep -q "ksu_feature_init();" "$INIT_C"; then
+                echo "Anchor ksu_feature_init() not found in $INIT_C, the driver has changed too much to patch automatically"
+                cat "$INIT_C"
+                exit 1
+              fi
+              sed -i '/ksu_feature_init();/i\
           #ifdef CONFIG_KSU_SUSFS\
               susfs_init();\
           #endif // #ifdef KSU_SUSFS\
           ' "$INIT_C"
-            grep -q "susfs_init()" "$INIT_C" || { echo "Manual susfs_init() injection failed"; exit 1; }
-          fi
+              grep -q "susfs_init()" "$INIT_C" || { echo "Manual susfs_init() injection failed"; exit 1; }
+            fi
 
-          python3 - "$INIT_C" <<'PYEOF'
+            python3 - "$INIT_C" <<'PYEOF'
           import re, sys
           path = sys.argv[1]
           with open(path) as f:
@@ -232,6 +237,13 @@ jobs:
               sys.exit(1)
           print("init.c finished: legacy symbols removed, modern calls inserted, externs added")
           PYEOF
+          else
+            echo "$DRIVER_DIR is not KernelSU (SukiSU-Ultra) — skipping the SukiSU-specific init.c repair."
+            echo "Gathering diagnostics instead of guessing a fix that was tuned for a different driver:"
+            find "$DRIVER_DIR" -name '*.rej' -exec echo "--- {} ---" \; -exec cat {} \;
+            echo "--- current $INIT_C (first 220 lines) ---"
+            sed -n '1,220p' "$INIT_C"
+          fi
 
           echo "[2/2] Applying patch 50 to the kernel tree (fs/, core hooks)..."
           PATCH_50=$(ls $PATCH_DIR/50_add_susfs_in_*.patch | head -n 1)
