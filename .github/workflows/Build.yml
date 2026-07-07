@@ -59,7 +59,9 @@ jobs:
         if: ${{ inputs.root_provider == 'ksu-next-stable' }}
         working-directory: ./kernel-6.6
         run: |
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/refs/heads/dev/kernel/setup.sh" | bash -s stable
+          # El setup.sh vive en la rama "next" del repo (no "dev"); el argumento
+          # "-s stable" es el que le dice que integre la variante estable.
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s stable
           test -d KernelSU-Next || { echo "KernelSU-Next integration failed"; exit 1; }
           echo "DRIVER_DIR=KernelSU-Next" >> "$GITHUB_ENV"
 
@@ -68,10 +70,16 @@ jobs:
         run: |
           mkdir -p ksun-manager
           API_URL="https://api.github.com/repos/KernelSU-Next/KernelSU-Next/releases/latest"
-          ASSET_URL=$(curl -LSs "$API_URL" | grep "browser_download_url.*\.apk" | head -n1 | cut -d '"' -f4)
-          test -n "$ASSET_URL" || { echo "Could not find an .apk asset in the latest KernelSU-Next release"; exit 1; }
+          # GitHub API a veces devuelve 403 sin un User-Agent explícito.
+          RELEASE_JSON=$(curl -LSs -H "User-Agent: a05m-kernel-ci" "$API_URL")
+          ASSET_URL=$(echo "$RELEASE_JSON" | grep "browser_download_url.*\.apk" | head -n1 | cut -d '"' -f4)
+          if [ -z "$ASSET_URL" ]; then
+            echo "Could not find an .apk asset in the latest KernelSU-Next release. Full API response:"
+            echo "$RELEASE_JSON"
+            exit 1
+          fi
           echo "Downloading $ASSET_URL"
-          curl -LSs "$ASSET_URL" -o "ksun-manager/KernelSU-Next.apk"
+          curl -LSs -H "User-Agent: a05m-kernel-ci" "$ASSET_URL" -o "ksun-manager/KernelSU-Next.apk"
           test -s "ksun-manager/KernelSU-Next.apk" || { echo "Manager APK download failed or is empty"; exit 1; }
 
       - name: Upload manager APK (KernelSU-Next)
