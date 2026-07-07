@@ -63,6 +63,13 @@ jobs:
           test -d KernelSU-Next || { echo "KernelSU-Next integration failed"; exit 1; }
           echo "DRIVER_DIR=KernelSU-Next" >> "$GITHUB_ENV"
 
+          echo "Removing the stale drivers/kernelsu (old vendored 'Adding RKSU' driver from the base repo)"
+          echo "from the build: KernelSU-Next wires itself in via the root Makefile, so this old,"
+          echo "unrelated driver has nothing to do with it, yet CONFIG_KSU=y still pulls it in via"
+          echo "drivers/Makefile unless we remove that line."
+          sed -i '/obj-\$(CONFIG_KSU) += kernelsu\//d' drivers/Makefile
+          grep -q "kernelsu/" drivers/Makefile && { echo "Failed to remove drivers/kernelsu from drivers/Makefile"; exit 1; }
+
       - name: Download the latest KernelSU-Next manager release APK
         if: ${{ inputs.root_provider == 'ksu-next-stable' }}
         run: |
