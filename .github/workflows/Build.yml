@@ -192,9 +192,16 @@ jobs:
               print(f"Could not find the if(ksu_late_loaded)/else block exactly once (found {n}) in kernelsu_init, needs manual review")
               sys.exit(1)
 
-          # 3. In kernelsu_exit(), make ksu_ksud_exit() unconditional
-          content, n2 = re.subn(
-              r"if\s*\(!ksu_late_loaded\)\s*\n\s*ksu_ksud_exit\(\);",
+          # 3. In kernelsu_exit(), make ksu_ksud_exit() unconditional. Handle both the
+          #    brace-less form (if (!x) foo();) and the braced form (if (!x) { foo(); }),
+          #    since different driver forks format this check differently.
+          content, n2a = re.subn(
+              r"if\s*\(!ksu_late_loaded\)\s*\{\s*\n(\s*ksu_ksud_exit\(\);\s*\n)\s*\}",
+              r"\1",
+              content,
+          )
+          content, n2b = re.subn(
+              r"if\s*\(!ksu_late_loaded\)\s*\n?\s*ksu_ksud_exit\(\);",
               "ksu_ksud_exit();",
               content,
           )
@@ -203,9 +210,6 @@ jobs:
               print("Script made no changes despite detecting legacy symbols, needs manual review")
               sys.exit(1)
 
-          with open(path, "w") as f:
-              f.write(content)
-
           remaining = [sym for sym in [
               "ksu_lsm_hook_init", "ksu_late_loaded",
               "ksu_syscall_hook_manager_init", "ksu_syscall_hook_manager_exit",
@@ -213,9 +217,16 @@ jobs:
           ] if sym in content]
           if remaining:
               print(f"Legacy symbols still remain after the fix: {remaining}")
+              for i, line in enumerate(content.split("\n")):
+                  if any(sym.rstrip("(") in line for sym in remaining):
+                      print(f"  line {i+1}: {line}")
               with open(path, "w") as f:
                   f.write(content)
               sys.exit(1)
+
+          with open(path, "w") as f:
+              f.write(content)
+
           if "extern void ksu_sucompat_init(void);" not in content or "extern void ksu_setuid_hook_init(void);" not in content:
               print("extern declarations for ksu_sucompat_init/ksu_setuid_hook_init were not inserted")
               sys.exit(1)
