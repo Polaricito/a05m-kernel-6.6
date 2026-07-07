@@ -59,9 +59,7 @@ jobs:
         if: ${{ inputs.root_provider == 'ksu-next-stable' }}
         working-directory: ./kernel-6.6
         run: |
-          # El setup.sh vive en la rama "next" del repo (no "dev"); el argumento
-          # "-s stable" es el que le dice que integre la variante estable.
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s stable
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/refs/heads/dev/kernel/setup.sh" | bash -s stable
           test -d KernelSU-Next || { echo "KernelSU-Next integration failed"; exit 1; }
           echo "DRIVER_DIR=KernelSU-Next" >> "$GITHUB_ENV"
 
@@ -70,16 +68,10 @@ jobs:
         run: |
           mkdir -p ksun-manager
           API_URL="https://api.github.com/repos/KernelSU-Next/KernelSU-Next/releases/latest"
-          # GitHub API a veces devuelve 403 sin un User-Agent explícito.
-          RELEASE_JSON=$(curl -LSs -H "User-Agent: a05m-kernel-ci" "$API_URL")
-          ASSET_URL=$(echo "$RELEASE_JSON" | grep "browser_download_url.*\.apk" | head -n1 | cut -d '"' -f4)
-          if [ -z "$ASSET_URL" ]; then
-            echo "Could not find an .apk asset in the latest KernelSU-Next release. Full API response:"
-            echo "$RELEASE_JSON"
-            exit 1
-          fi
+          ASSET_URL=$(curl -LSs "$API_URL" | grep "browser_download_url.*\.apk" | head -n1 | cut -d '"' -f4)
+          test -n "$ASSET_URL" || { echo "Could not find an .apk asset in the latest KernelSU-Next release"; exit 1; }
           echo "Downloading $ASSET_URL"
-          curl -LSs -H "User-Agent: a05m-kernel-ci" "$ASSET_URL" -o "ksun-manager/KernelSU-Next.apk"
+          curl -LSs "$ASSET_URL" -o "ksun-manager/KernelSU-Next.apk"
           test -s "ksun-manager/KernelSU-Next.apk" || { echo "Manager APK download failed or is empty"; exit 1; }
 
       - name: Upload manager APK (KernelSU-Next)
@@ -111,34 +103,31 @@ jobs:
           PATCH_DIR="../susfs4ksu/kernel_patches"
           INIT_C="$DRIVER_DIR/kernel/core/init.c"
 
-          if [ "$SUSFS_PREINTEGRATED" == "true" ]; then
-            echo "[1/2] Skipped: $DRIVER_DIR already has SUSFS pre-integrated (next-susfs branch), no driver patch needed"
-          else
-            echo "[1/2] Applying patch 10 to the $DRIVER_DIR driver"
-            if [ ! -f "$PATCH_DIR/KernelSU/10_enable_susfs_for_ksu.patch" ]; then
-              echo "10_enable_susfs_for_ksu.patch not found in $PATCH_DIR/KernelSU/"
+          echo "[1/2] Applying patch 10 to the $DRIVER_DIR driver"
+          if [ ! -f "$PATCH_DIR/KernelSU/10_enable_susfs_for_ksu.patch" ]; then
+            echo "10_enable_susfs_for_ksu.patch not found in $PATCH_DIR/KernelSU/"
+            exit 1
+          fi
+          cp "$PATCH_DIR/KernelSU/10_enable_susfs_for_ksu.patch" "./$DRIVER_DIR/"
+
+          (cd "$DRIVER_DIR" && patch -p1 --forward --fuzz=3 < 10_enable_susfs_for_ksu.patch) || \
+            echo "Patch 10 did not apply cleanly (likely driver drift), attempting automatic repair."
+
+          if ! grep -q "susfs_init()" "$INIT_C"; then
+            if ! grep -q "ksu_feature_init();" "$INIT_C"; then
+              echo "Anchor ksu_feature_init() not found in $INIT_C, the driver has changed too much to patch automatically"
+              cat "$INIT_C"
               exit 1
             fi
-            cp "$PATCH_DIR/KernelSU/10_enable_susfs_for_ksu.patch" "./$DRIVER_DIR/"
-
-            (cd "$DRIVER_DIR" && patch -p1 --forward --fuzz=3 < 10_enable_susfs_for_ksu.patch) || \
-              echo "Patch 10 did not apply cleanly (likely driver drift), attempting automatic repair."
-
-            if ! grep -q "susfs_init()" "$INIT_C"; then
-              if ! grep -q "ksu_feature_init();" "$INIT_C"; then
-                echo "Anchor ksu_feature_init() not found in $INIT_C, the driver has changed too much to patch automatically"
-                cat "$INIT_C"
-                exit 1
-              fi
-              sed -i '/ksu_feature_init();/i\
+            sed -i '/ksu_feature_init();/i\
           #ifdef CONFIG_KSU_SUSFS\
               susfs_init();\
           #endif // #ifdef KSU_SUSFS\
           ' "$INIT_C"
-              grep -q "susfs_init()" "$INIT_C" || { echo "Manual susfs_init() injection failed"; exit 1; }
-            fi
+            grep -q "susfs_init()" "$INIT_C" || { echo "Manual susfs_init() injection failed"; exit 1; }
+          fi
 
-            python3 - "$INIT_C" <<'PYEOF'
+          python3 - "$INIT_C" <<'PYEOF'
           import re, sys
           path = sys.argv[1]
           with open(path) as f:
@@ -232,7 +221,6 @@ jobs:
               sys.exit(1)
           print("init.c finished: legacy symbols removed, modern calls inserted, externs added")
           PYEOF
-          fi
 
           echo "[2/2] Applying patch 50 to the kernel tree (fs/, core hooks)..."
           PATCH_50=$(ls $PATCH_DIR/50_add_susfs_in_*.patch | head -n 1)
