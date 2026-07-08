@@ -123,11 +123,10 @@ jobs:
           (cd "$DRIVER_DIR" && patch -p1 --forward --fuzz=3 < 10_enable_susfs_for_ksu.patch) || \
             echo "Patch 10 did not apply cleanly (likely driver drift), attempting automatic repair."
 
-          if [ "$DRIVER_DIR" == "KernelSU" ]; then
-            # This repair sequence was built and verified specifically against SukiSU-Ultra's
-            # driver structure. Do not reuse it for other drivers without checking first —
-            # symbol names that are dead code in one driver (e.g. ksu_late_loaded) can still
-            # be live, in-use variables in another.
+          if [ "$DRIVER_DIR" == "KernelSU" ] || [ "$DRIVER_DIR" == "KernelSU-Next" ]; then
+            # Verified against both SukiSU-Ultra's and KernelSU-Next's (stable) driver: both
+            # still carry the same pre-refactor init.c (ksu_late_loaded, ksu_lsm_hook_init,
+            # ksu_syscall_hook_manager_init/_exit), so the same repair applies to both.
             if ! grep -q "susfs_init()" "$INIT_C"; then
               if ! grep -q "ksu_feature_init();" "$INIT_C"; then
                 echo "Anchor ksu_feature_init() not found in $INIT_C, the driver has changed too much to patch automatically"
@@ -248,11 +247,50 @@ jobs:
           print("init.c finished: legacy symbols removed, modern calls inserted, externs added")
           PYEOF
           else
-            echo "$DRIVER_DIR is not KernelSU (SukiSU-Ultra) — skipping the SukiSU-specific init.c repair."
-            echo "Gathering diagnostics instead of guessing a fix that was tuned for a different driver:"
+            echo "$DRIVER_DIR is a driver we haven't checked yet — skipping the init.c repair instead of guessing."
+            echo "Gathering diagnostics instead:"
             find "$DRIVER_DIR" -name '*.rej' -exec echo "--- {} ---" \; -exec cat {} \;
             echo "--- current $INIT_C (first 220 lines) ---"
             sed -n '1,220p' "$INIT_C"
+          fi
+
+          if [ "$DRIVER_DIR" == "KernelSU-Next" ]; then
+            # kernel_umount.c: patch 10 wants to drop an early-return block (the "6 scenarios"
+            # checks) that's redundant with newer logic elsewhere. The hunk is reported as
+            # "ignored" rather than "failed", but we've seen it left untouched, so remove it
+            # explicitly rather than assume patch's own judgment call took effect.
+            UMOUNT_C="$DRIVER_DIR/kernel/feature/kernel_umount.c"
+            if [ -f "$UMOUNT_C" ] && grep -q "There are 6 scenarios" "$UMOUNT_C"; then
+              python3 - "$UMOUNT_C" <<'PYEOF'
+          import re, sys
+          path = sys.argv[1]
+          with open(path) as f:
+              content = f.read()
+          original = content
+          content = re.sub(
+              r"[ \t]*// There are 6 scenarios:.*?\n[ \t]*// umount the target mnt",
+              "\t// umount the target mnt",
+              content,
+              flags=re.DOTALL,
+          )
+          if content == original:
+              print("kernel_umount.c: pattern not found, leaving as-is")
+          else:
+              with open(path, "w") as f:
+                  f.write(content)
+              print("kernel_umount.c: redundant early-return block removed")
+          PYEOF
+            fi
+
+            echo "Diagnostics for the next iteration (sucompat.c, setuid_hook.c, supercall.c need dedicated"
+            echo "fixes not written yet; selinux_hide.c didn't produce a .rej but its symbols are still"
+            echo "missing at link time, so let's see what's actually in it):"
+            SELINUX_HIDE_C="$DRIVER_DIR/kernel/feature/selinux_hide.c"
+            if [ -f "$SELINUX_HIDE_C" ]; then
+              grep -n "ksu_selinux_hide_running\|ksu_selinux_hide_enabled\|backup_sepolicy\|fake_status\|setup_selinux" "$SELINUX_HIDE_C" || echo "(none of the expected symbols are present in $SELINUX_HIDE_C at all)"
+            else
+              echo "$SELINUX_HIDE_C does not exist"
+            fi
           fi
 
           echo "[2/2] Applying patch 50 to the kernel tree (fs/, core hooks)..."
