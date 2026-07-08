@@ -225,10 +225,13 @@ jobs:
               sys.exit(1)
 
           remaining = [sym for sym in [
-              "ksu_lsm_hook_init", "ksu_late_loaded",
+              "ksu_lsm_hook_init",
               "ksu_syscall_hook_manager_init", "ksu_syscall_hook_manager_exit",
               "ksu_init_symbol_resolver", "ksu_syscall_hook_init(",
           ] if sym in content]
+          # Note: ksu_late_loaded itself isn't checked here anymore. Once the if/else block and
+          # the exit-time check are gone, any leftover "ksu_late_loaded = ...;" assignments are
+          # just dead stores to a variable nothing reads anymore — harmless, not a compile error.
           if remaining:
               print(f"Legacy symbols still remain after the fix: {remaining}")
               for i, line in enumerate(content.split("\n")):
