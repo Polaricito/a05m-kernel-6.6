@@ -286,17 +286,14 @@ jobs:
             fi
 
             echo "feature/selinux_hide.c defines its symbols fine (ksu_selinux_hide_enabled, fake_status,"
-            echo "etc.) but the linker still reports them undefined -- same class of bug as SukiSU-Ultra's"
-            echo "missing infra/symbol_resolver.o: the file is compiled by nothing because it's simply"
-            echo "missing from the Kbuild object list. Fixing the wiring, not the content."
+            echo "etc.) but the linker still reports them undefined. Checking the exact context around"
+            echo "selinux_hide in the Kbuild before assuming it's simply missing (it may be present but"
+            echo "gated behind an ifeq/ifdef that isn't active, same trap as the __x86_64__ block in init.c):"
             KSUN_KBUILD="$DRIVER_DIR/kernel/Kbuild"
-            if [ -f "$KSUN_KBUILD" ] && ! grep -q "feature/selinux_hide.o" "$KSUN_KBUILD"; then
-              sed -i '/feature\/kernel_umount.o/a kernelsu-objs += feature/selinux_hide.o' "$KSUN_KBUILD"
-              grep -q "feature/selinux_hide.o" "$KSUN_KBUILD" || { echo "Could not insert feature/selinux_hide.o into $KSUN_KBUILD"; exit 1; }
-              echo "feature/selinux_hide.o added to kernelsu-objs"
-            else
-              echo "feature/selinux_hide.o already in kernelsu-objs (or Kbuild not found), nothing to do"
-            fi
+            test -f "$KSUN_KBUILD" || echo "$KSUN_KBUILD does not exist"
+            grep -n -B3 -A3 "selinux_hide" "$KSUN_KBUILD" || echo "(no mention of selinux_hide anywhere in $KSUN_KBUILD)"
+            echo "--- full $KSUN_KBUILD ---"
+            cat -n "$KSUN_KBUILD"
 
             echo "Diagnostics for the next iteration: sucompat.c and setuid_hook.c still need real"
             echo "content fixes (their new-style handler functions don't exist yet, this isn't just"
