@@ -94,7 +94,7 @@ jobs:
           cp -r ../susfs4ksu/kernel_patches/include/linux/* ./include/linux/
 
           PATCH_DIR="../susfs4ksu/kernel_patches"
-          KSU_DIR="KernelSU"
+          KSU_DIR="KernelSU-Next"
           KSU_INIT_C="$KSU_DIR/kernel/ksu.c"
 
           # ─────────────────────────────────────────────────────────
@@ -105,20 +105,21 @@ jobs:
             echo "❌ No se encontró 10_enable_susfs_for_ksu.patch en $PATCH_DIR/KernelSU/"
             exit 1
           fi
-          cp "$PATCH_DIR/KernelSU/10_enable_susfs_for_ksu.patch" ./$KSU_DIR/
 
-          (cd $KSU_DIR && patch -p1 --forward --fuzz=3 < 10_enable_susfs_for_ksu.patch)
-          if [ $? -ne 0 ]; then
+          # El parche de SUSFS usa rutas 'KernelSU/...'; las adaptamos a 'KernelSU-Next/...'
+          sed 's|KernelSU/|KernelSU-Next/|g' "$PATCH_DIR/KernelSU/10_enable_susfs_for_ksu.patch" > /tmp/10_enable_susfs_for_ksu_next.patch
+
+          if patch -p1 --forward --fuzz=3 < /tmp/10_enable_susfs_for_ksu_next.patch; then
+            echo "✅ Parche 10 aplicado correctamente."
+          else
             echo "⚠️ El parche 10 no aplicó limpiamente. Iniciando inyección manual de susfs_init()..."
-      
-            # KernelSU Next usa ksu.c en lugar de core/init.c
+
             if [ ! -f "$KSU_INIT_C" ]; then
               echo "❌ No se encontró $KSU_INIT_C — la estructura del driver cambió"
               exit 1
             fi
 
-            # Buscar un ancla segura para insertar susfs_init()
-            # En KernelSU Next, ksu_sucompat_init() y ksu_ksud_init() son las funciones de init
+            # Buscar ancla segura para insertar susfs_init()
             if grep -q "ksu_sucompat_init();" "$KSU_INIT_C"; then
               sed -i '/ksu_sucompat_init();/i\
           #ifdef CONFIG_KSU_SUSFS\
@@ -138,8 +139,6 @@ jobs:
             fi
 
             grep -q "susfs_init()" "$KSU_INIT_C" || { echo "❌ La inyección manual de susfs_init() falló"; exit 1; }
-          else
-            echo "✅ Parche 10 aplicado correctamente."
           fi
 
           # ─────────────────────────────────────────────────────────
@@ -149,19 +148,18 @@ jobs:
           PATCH_50=$(ls $PATCH_DIR/50_add_susfs_in_*.patch | head -n 1)
           test -n "$PATCH_50" || { echo "❌ No se encontró parche 50_add_susfs_in_*.patch"; exit 1; }
 
-          patch -p1 --forward < "$PATCH_50"
-          PATCH_50_STATUS=$?
-      
-          if [ $PATCH_50_STATUS -ne 0 ]; then
+          if patch -p1 --forward < "$PATCH_50"; then
+            echo "✅ Parche 50 aplicado correctamente."
+          else
             echo "⚠️ Algunos hunks del parche 50 fallaron. Iniciando inyección manual de dependencias..."
-            
+
             # 2.1 Hacer que susfs_def.h sea independiente
             sed -i '1i #include <linux/sched.h>\n#include <linux/thread_info.h>\n#include <linux/cred.h>' include/linux/susfs_def.h
-      
+
             # 2.2 Insertar include de susfs_def.h en archivos .c del kernel
             for f in mm/memory.c fs/namespace.c fs/open.c fs/proc/base.c fs/exec.c; do
               if ! grep -q "linux/susfs_def.h" "$f"; then
-          LAST_INCLUDE=$(grep -n "^#include" "$f" | tail -1 | cut -d: -f1)
+                LAST_INCLUDE=$(grep -n "^#include" "$f" | tail -1 | cut -d: -f1)
                 if [ -n "$LAST_INCLUDE" ]; then
                   sed -i "${LAST_INCLUDE}a #ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs_def.h>\n#endif" "$f"
                 else
@@ -207,7 +205,6 @@ jobs:
               sed -i '/#include <linux\/susfs_def.h>/a #ifdef CONFIG_KSU_SUSFS\n/* SUSFS_AUTOFIX_EXEC */\nextern struct static_key_true ksu_su_compat_enabled;\nextern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;\nextern bool __ksu_is_allow_uid_for_current(uid_t uid);\nextern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv, void *envp, int *flags);\nextern int ksu_handle_execveat_sucompat(int *fd, struct filename **filename_ptr, void *argv, void *envp, int *flags);\n#endif' fs/exec.c
             fi
 
-            # Verificar que los marcadores quedaron insertados
             echo "🔎 Verificando marcadores de auto-reparación..."
             for check in "fs/namespace.c:SUSFS_AUTOFIX_NAMESPACE" "fs/open.c:SUSFS_AUTOFIX_OPEN_EXTERNS" "fs/open.c:SUSFS_AUTOFIX_RETRY_LABEL" "fs/open.c:SUSFS_AUTOFIX_OPEN_REDIRECT_BLOCK" "fs/exec.c:SUSFS_AUTOFIX_EXEC"; do
               file="${check%%:*}"
@@ -218,8 +215,6 @@ jobs:
                 echo "   ⚠️ $marker NO quedó insertado en $file"
               fi
             done
-          else
-            echo "✅ Parche 50 aplicado correctamente."
           fi
 
           # ─────────────────────────────────────────────────────────
@@ -241,15 +236,14 @@ jobs:
           grep -q "susfs" fs/Makefile || { echo "❌ El parche 50 no modificó fs/Makefile como se esperaba"; exit 1; }
           echo "✅ fs/Makefile contiene referencias a susfs"
 
-          # Verificar que el driver refleja SUSFS
           if [ -L "drivers/kernelsu" ]; then
-            grep -q "susfs_init()" drivers/kernelsu/kernel/ksu.c 2>/dev/null || grep -q "susfs_init()" drivers/kernelsu/ksu.c 2>/dev/null || {
+            grep -q "susfs_init()" drivers/kernelsu/ksu.c 2>/dev/null || grep -q "susfs_init()" drivers/kernelsu/kernel/ksu.c 2>/dev/null || {
               echo "❌ drivers/kernelsu no refleja el driver parcheado con SUSFS"
               exit 1
             }
             echo "✅ drivers/kernelsu (vía symlink) refleja el driver ya parcheado con SUSFS"
           else
-            echo "ℹ️ drivers/kernelsu no es un symlink, verificando KernelSU/kernel/ksu.c..."
+            echo "ℹ️ drivers/kernelsu no es un symlink, verificando $KSU_INIT_C..."
             grep -q "susfs_init()" $KSU_INIT_C || { echo "❌ $KSU_INIT_C no tiene susfs_init()"; exit 1; }
             echo "✅ $KSU_INIT_C contiene susfs_init()"
           fi
