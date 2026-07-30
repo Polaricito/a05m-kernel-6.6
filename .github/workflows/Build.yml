@@ -66,7 +66,7 @@ jobs:
         if: ${{ inputs.root_provider == 'sukisu-ultra-v4.1.3' }}
         working-directory: ./kernel-6.6
         run: |
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s builtin
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s v4.1.3
           echo "SUKISU_COMMIT=$(cd KernelSU && git rev-parse HEAD)" >> "$GITHUB_ENV"
 
           echo "🔎 Diagnóstico: setup.sh mencionó '[+] Symlink created.' — veamos qué es exactamente:"
