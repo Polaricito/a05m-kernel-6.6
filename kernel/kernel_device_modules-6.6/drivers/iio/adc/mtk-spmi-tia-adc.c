@@ -124,7 +124,7 @@ unsigned long long adc2volt(unsigned int adc_raw)
 	return ((unsigned long long)adc_raw * TIA_DEFAULT_PULLUP_V) >> 15;
 }
 
-static unsigned int convert_adc_data(struct device *dev, unsigned int raw_data, unsigned int pullup_r)
+static int convert_adc_data(struct device *dev, unsigned int raw_data, unsigned int pullup_r, unsigned int *auxadc_out)
 {
 	unsigned long long v_in, cal_pullup_r, convert_v_in;
 	unsigned int convert_raw;
@@ -139,10 +139,11 @@ static unsigned int convert_adc_data(struct device *dev, unsigned int raw_data, 
 	convert_v_in = (TIA_DEFAULT_PULLUP_V * cal_pullup_r) / (TIA_PU_R_100K + cal_pullup_r);
 	convert_raw = (unsigned int) (convert_v_in * (32768) /TIA_DEFAULT_PULLUP_V);
 
-	dev_dbg_ratelimited(dev, "[TIA_TEST_A] raw_data=%d/%d/%llu/%llu/%llu/%d\n",
-		raw_data, pullup_r, v_in, cal_pullup_r, convert_v_in, convert_raw);
+	dev_dbg_ratelimited(dev, "[TIA_TEST_A] raw_data=%d/%d/%llu/%llu/%llu/%d(%d)\n",
+		raw_data, pullup_r, v_in, cal_pullup_r, convert_v_in, convert_raw, *auxadc_out);
 
-	return convert_raw;
+	*auxadc_out = convert_raw;
+	return 0;
 }
 
 static int pmic_adc_read_raw(struct iio_dev *indio_dev,
@@ -179,7 +180,7 @@ static int pmic_adc_read_raw(struct iio_dev *indio_dev,
 		break;
 	case TIA_PU_R_30K_TYPE_1:
 	case TIA_PU_R_400K_TYPE_2:
-		auxadc_out = convert_adc_data(tia_adc_dev->dev, temp_auxadc, tia2_rc_sel_to_value(r_type));
+		ret = convert_adc_data(tia_adc_dev->dev, temp_auxadc, tia2_rc_sel_to_value(r_type), &auxadc_out);
 		break;
 	default:
 		ret = -EINVAL;

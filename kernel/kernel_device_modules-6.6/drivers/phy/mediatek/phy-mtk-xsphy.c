@@ -204,6 +204,11 @@
 #define SSPXTP_DAIG_LN_RX0_48   ((SSPXTP_SIFSLV_DIG_LN_RX0) + 0x048)
 #define RG_XTP0_U1_U2_EXIT_EQUAL		BIT(19)
 
+#define SSPXTP_DIAG_LN_RX0_6C	((SSPXTP_SIFSLV_DIG_LN_RX0) + 0x06C)
+#define RG_XTP0_CDR_PPATH_DVN_G1_LTD1	GENMASK(7, 0)
+#define RG_XTP0_CDR_PPATH_DVN_G1_LTD1_MASK	(0xFF)
+#define RG_XTP0_CDR_PPATH_DVN_G1_LTD1_OFST	(0)
+
 #define SSPXTP_DAIG_LN_RX0_70	((SSPXTP_SIFSLV_DIG_LN_RX0) + 0x070)
 #define RG_XTP0_CDR_PPATH_DVN_G2_LTD0		GENMASK(7, 0)
 #define RG_XTP0_CDR_PPATH_DVN_G2_LTD1		GENMASK(15, 8)
@@ -303,6 +308,7 @@
 #define TX_LCTXCM1_STR "tx_lctxcm1"
 #define TX_LCTXC0_STR "tx_lctxc0"
 #define TX_LCTXCP1_STR "tx_lctxcp1"
+#define RX_JTOL_STR "rx_jtol"
 
 #define XSP_MODE_UART_STR "usb2uart_mode=1"
 #define XSP_MODE_JTAG_STR "usb2jtag_mode=1"
@@ -426,6 +432,7 @@ struct xsphy_instance {
 	int tx_lctxcm1;
 	int tx_lctxc0;
 	int tx_lctxcp1;
+	int rx_jtol;
 	bool u3_rx_fix;
 	bool u3_gen2_hqa;
 	/* u3 lpm */
@@ -821,6 +828,57 @@ static const struct proc_ops proc_tx_lctxcp1_fops = {
 	.proc_release = single_release,
 };
 
+static int proc_rx_jtol_show(struct seq_file *s, void *unused)
+{
+	struct xsphy_instance *inst = s->private;
+	void __iomem *pbase = inst->port_base;
+	u32 tmp;
+
+	tmp = readl(pbase + SSPXTP_DIAG_LN_RX0_6C);
+	tmp >>= RG_XTP0_CDR_PPATH_DVN_G1_LTD1_OFST;
+	tmp &= RG_XTP0_CDR_PPATH_DVN_G1_LTD1_MASK;
+
+	seq_printf(s, "%d\n", tmp);
+	return 0;
+}
+
+static int proc_rx_jtol_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, proc_rx_jtol_show, pde_data(inode));
+}
+
+static ssize_t proc_rx_jtol_write(struct file *file,
+	const char __user *ubuf, size_t count, loff_t *ppos)
+{
+	struct seq_file *s = file->private_data;
+	struct xsphy_instance *inst = s->private;
+	void __iomem *pbase = inst->port_base;
+	char buf[20];
+	u32 val;
+
+	memset(buf, 0x00, sizeof(buf));
+	if (copy_from_user(&buf, ubuf, min_t(size_t, sizeof(buf) - 1, count)))
+		return -EFAULT;
+
+	if (kstrtouint(buf, 10, &val))
+		return -EINVAL;
+
+	inst->rx_jtol = val;
+
+	mtk_phy_update_field(pbase + SSPXTP_DIAG_LN_RX0_6C, RG_XTP0_CDR_PPATH_DVN_G1_LTD1, val);
+
+	return count;
+}
+
+static const struct proc_ops proc_rx_jtol_fops = {
+	.proc_open = proc_rx_jtol_open,
+	.proc_write = proc_rx_jtol_write,
+	.proc_read = seq_read,
+	.proc_lseek = seq_lseek,
+	.proc_release = single_release,
+};
+
+
 static int u3_phy_procfs_init(struct mtk_xsphy *xsphy,
 			struct xsphy_instance *inst)
 {
@@ -879,6 +937,14 @@ static int u3_phy_procfs_init(struct mtk_xsphy *xsphy,
 			phy_root, &proc_tx_lctxcp1_fops, inst);
 	if (!file) {
 		dev_info(dev, "failed to creat proc file: %s\n", TX_LCTXCP1_STR);
+		ret = -ENOMEM;
+		goto err1;
+	}
+
+	file = proc_create_data(RX_JTOL_STR, 0640,
+			phy_root, &proc_rx_jtol_fops, inst);
+	if (!file) {
+		dev_info(dev, "failed to creat proc file: %s\n", RX_JTOL_STR);
 		ret = -ENOMEM;
 		goto err1;
 	}
@@ -2309,6 +2375,9 @@ static void phy_parse_property(struct mtk_xsphy *xsphy,
 		if (device_property_read_u32(dev, "mediatek,tx-lctxcp1",
 					 &inst->tx_lctxcp1) || inst->tx_lctxcp1 < 0)
 			inst->tx_lctxcp1 = -EINVAL;
+		if (device_property_read_u32(dev, "mediatek,rx-jtol",
+					 &inst->rx_jtol) || inst->rx_jtol < 0)
+			inst->rx_jtol = -EINVAL;
 		inst->u3_rx_fix = device_property_read_bool(dev, "mediatek,u3-rx-fix");
 		inst->u3_gen2_hqa = device_property_read_bool(dev, "mediatek,u3-gen2-hqa");
 		inst->u3_sw_efuse = device_property_read_bool(dev, "mediatek,u3-sw-efuse");
@@ -2491,6 +2560,11 @@ static void u3_phy_props_set(struct mtk_xsphy *xsphy,
 		mtk_phy_update_field(pbase + SSPXTP_DAIG_LN_DAIF_08,
 				    RG_XTP0_DAIF_LN_TX_LCTXCP1, inst->tx_lctxcp1);
 	}
+
+	if (inst->rx_jtol != -EINVAL) {
+		mtk_phy_update_field(pbase + SSPXTP_DIAG_LN_RX0_6C,
+				    RG_XTP0_CDR_PPATH_DVN_G1_LTD1, inst->rx_jtol);
+	}
 }
 
 static int mtk_phy_init(struct phy *phy)
@@ -2541,8 +2615,8 @@ static int mtk_phy_init(struct phy *phy)
 			inst->efuse_intr, inst->efuse_tx_imp,
 			inst->efuse_rx_imp);
 		dev_info(xsphy->dev,
-			"tx-lctxcm1:%d, tx-lctxc0:%d, tx-lctxcp1:%d\n",
-			inst->tx_lctxcm1, inst->tx_lctxc0, inst->tx_lctxcp1);
+			"tx-lctxcm1:%d, tx-lctxc0:%d, tx-lctxcp1:%d, rx-jtol:%d\n",
+			inst->tx_lctxcm1, inst->tx_lctxc0, inst->tx_lctxcp1, inst->rx_jtol);
 		break;
 	default:
 		dev_err(xsphy->dev, "incompatible phy type\n");

@@ -2410,6 +2410,8 @@ bool imgsys_cmdq_ts_enable_plat8(void)
 
 u32 imgsys_wpe_bwlog_enable_plat8(void)
 {
+	if(imgsys_wpe_bwlog_en < 0)
+		imgsys_wpe_bwlog_en = 0;
 	return imgsys_wpe_bwlog_en;
 }
 
@@ -2456,6 +2458,8 @@ bool imgsys_iova_dbg_enable_plat8(void)
 
 u32 imgsys_iova_dbg_port_plat8(void)
 {
+	if(imgsys_iova_dbg_port_en < 0)
+		imgsys_iova_dbg_port_en = 0;
 	return imgsys_iova_dbg_port_en;
 }
 

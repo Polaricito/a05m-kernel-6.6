@@ -1774,15 +1774,6 @@ out:
 
 static int eem_force_sensing_proc_show(struct seq_file *m, void *v)
 {
-	struct eem_ipi_data eem_data;
-	unsigned int ipi_ret = 0;
-
-	FUNC_ENTER(FUNC_LV_HELP);
-	memset(&eem_data, 0, sizeof(struct eem_ipi_data));
-	ipi_ret = eem_to_eb(IPI_EEMSN_FORCE_SN_SENSING, &eem_data);
-	seq_printf(m, "ret:%d\n", ipi_ret);
-	FUNC_EXIT(FUNC_LV_HELP);
-
 	return 0;
 }
 

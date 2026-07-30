@@ -17,6 +17,7 @@
 
 #define MML_MAX_COMPONENTS	50
 #define MML_MAX_PORT		18
+#define MML_MAX_LARB		5
 
 struct mml_comp;
 struct mml_dev;
@@ -103,6 +104,7 @@ u32 mml_qos_update_tput(struct mml_dev *mml, bool dpc, enum mml_sys_id sysid, bo
 s32 mml_comp_init(struct platform_device *comp_pdev, struct mml_comp *comp);
 
 s32 mml_comp_init_larb(struct mml_comp *comp, struct device *dev);
+void mml_comp_init_larb_idx(struct mml_dev *mml, struct mml_topology_cache *cache);
 s32 mml_comp_pw_enable(struct mml_comp *comp, const s8 mode);
 s32 mml_comp_pw_disable(struct mml_comp *comp, const s8 mode);
 s32 mml_comp_clk_enable(struct mml_comp *comp);
@@ -129,8 +131,8 @@ void mml_dpc_task_cnt_inc(struct mml_task *task);
 void mml_dpc_task_cnt_dec(struct mml_task *task);
 void mml_dpc_exc_keep(struct mml_dev *mml, u32 sysid);
 void mml_dpc_exc_release(struct mml_dev *mml, u32 sysid);
-void mml_dpc_exc_keep_task(struct mml_task *task, const struct mml_topology_path *path);
-void mml_dpc_exc_release_task(struct mml_task *task, const struct mml_topology_path *path);
+void mml_dpc_exc_keep_path(struct mml_dev *mml, const struct mml_topology_path *path);
+void mml_dpc_exc_release_path(struct mml_dev *mml, const struct mml_topology_path *path);
 void mml_dpc_dc_enable(struct mml_dev *mml, u32 sysid, bool en);
 void mml_dpc_bw_update(struct mml_dev *mml, enum mml_sys_id sysid, u32 total_bw, u32 hrt_bw);
 

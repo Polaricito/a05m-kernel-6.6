@@ -936,7 +936,8 @@ void mtk_cam_sensor_req_buffer_done(struct mtk_cam_job *job,
 			     bool is_proc)
 {
 	struct mtk_cam_request *req = job->req_sensor;
-	struct device *dev = req->req.mdev->dev;
+	struct device *dev;
+	struct media_request *mreq = &req->req;
 	struct list_head done_list_sensor;
 	unsigned long ids_sensor;
 	bool is_buf_empty_sensor;
@@ -945,12 +946,10 @@ void mtk_cam_sensor_req_buffer_done(struct mtk_cam_job *job,
 	if (node_id != -1 ||
 		pipe_id >= MTKCAM_SUBDEV_RAW_END)
 		return;
-
-	if (CAM_DEBUG_ENABLED(JOB))
-		dev_info(dev,
-		"%s: req:%s pipe_id:%d check sensor req buffers\n",
-		__func__, job->req_sensor->debug_str, pipe_id);
+	if (!mreq)
+		return;
 	media_request_get(&req->req);
+	dev = req->req.mdev->dev;
 	INIT_LIST_HEAD(&done_list_sensor);
 	ids_sensor = 0;
 	is_buf_empty_sensor = !mtk_cam_req_collect_vb_bufs(req,
@@ -1404,7 +1403,7 @@ int mtk_cam_power_ctrl_ccu(struct device *dev, int on_off)
 		++cam->ccu_use_cnt;
 	} else {
 
-		if (WARN_ON(!cam->ccu_use_cnt)) {
+		if (!cam->ccu_use_cnt) {
 			ret = -1;
 			goto EXIT;
 		}
@@ -3247,7 +3246,7 @@ int ctx_stream_on_seninf_sensor(struct mtk_cam_job *job,
 			 ctx->stream_id, seninf->name, ret);
 		return -EPERM;
 	}
-
+	atomic_set(&ctx->seninf_streaming, 1);
 	MTK_CAM_TRACE_END(BASIC);
 	return ret;
 }
@@ -3266,14 +3265,17 @@ int ctx_stream_off_seninf_sensor(struct mtk_cam_ctx *ctx)
 
 	if (!ctx->seninf)
 		return ret;
-
+	if (atomic_read(&ctx->seninf_streaming) == 0) {
+		dev_info(ctx->cam->dev, "seninf not streaming\n");
+		return ret;
+	}
 	ret = v4l2_subdev_call(ctx->seninf, video, s_stream, 0);
 	if (ret) {
 		dev_info(ctx->cam->dev, "ctx %d failed to stream_off %s %d\n",
 			 ctx->stream_id, ctx->seninf->name, ret);
 		return -EPERM;
 	}
-
+	atomic_set(&ctx->seninf_streaming, 0);
 	return ret;
 }
 
@@ -3941,9 +3943,9 @@ static int mtk_cam_master_bind(struct device *dev)
 
 	mutex_lock(&cam_dev->v4l2_dev.mdev->graph_mutex);
 	mtk_cam_create_links(cam_dev);
+	mutex_unlock(&cam_dev->v4l2_dev.mdev->graph_mutex);
 	/* Expose all subdev's nodes */
 	ret = v4l2_device_register_subdev_nodes(&cam_dev->v4l2_dev);
-	mutex_unlock(&cam_dev->v4l2_dev.mdev->graph_mutex);
 	if (ret) {
 		dev_dbg(dev, "Failed to register subdev nodes\n");
 		goto fail_unreg_mraw_entities;
@@ -3998,12 +4000,15 @@ static void mtk_cam_master_unbind(struct device *dev)
 
 	mtk_raw_unregister_entities(cam_dev->pipelines.raw,
 				    cam_dev->pipelines.num_raw);
+	mtk_raw_pipeline_delete(cam_dev->pipelines.raw);
 
 	mtk_camsv_unregister_entities(cam_dev->pipelines.camsv,
 				    cam_dev->pipelines.num_camsv);
+	mtk_camsv_pipeline_delete(cam_dev->pipelines.camsv);
 
 	mtk_mraw_unregister_entities(cam_dev->pipelines.mraw,
 				    cam_dev->pipelines.num_mraw);
+	mtk_mraw_pipeline_delete(cam_dev->pipelines.mraw);
 
 	mtk_cam_dvfs_remove(&cam_dev->dvfs);
 
@@ -4021,7 +4026,11 @@ static int compare_dev(struct device *dev, void *data)
 
 static void mtk_cam_match_remove(struct device *dev)
 {
-	(void) dev;
+	struct mtk_cam_device *cam_dev = dev_get_drvdata(dev);
+	struct mtk_cam_engines *eng = &cam_dev->engines;
+
+	if (eng->raw_devs != NULL)
+		vfree(eng->raw_devs);
 }
 
 static int add_match_by_driver(struct device *dev,
@@ -4055,7 +4064,7 @@ static int mtk_cam_alloc_for_engine(struct device *dev)
 		+ eng->num_mraw_devices
 		+ eng->num_larb_devices;
 
-	dev_arr = devm_kzalloc(dev, sizeof(*dev) * num, GFP_KERNEL);
+	dev_arr = vzalloc(sizeof(struct device *) * num);
 	if (!dev_arr)
 		return -ENOMEM;
 
@@ -4880,7 +4889,7 @@ static int mtk_cam_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 	set_platform_data(platform_data);
-	dev_info(dev, "platform = %s\n", platform_data->platform);
+	dev_info(dev, "[%d %s] platform = %s\n", __LINE__, __func__, platform_data->platform);
 
 	camsys_root_dev = dev;
 
@@ -5144,8 +5153,7 @@ SKIP_ADLRD_IRQ:
 
 	/* FIXME: decide max raw stream num by seninf num */
 	cam_dev->max_stream_num = 8; /* TODO: how */
-	cam_dev->ctxs = devm_kcalloc(dev, cam_dev->max_stream_num,
-				     sizeof(*cam_dev->ctxs), GFP_KERNEL);
+	cam_dev->ctxs = vzalloc(cam_dev->max_stream_num * sizeof(*cam_dev->ctxs));
 	if (!cam_dev->ctxs) {
 		dev_err(dev, "%s: kcalloc cam_dev->ctxs failed\n", __func__);
 		WRAP_AEE_EXCEPTION("mtk_cam_probe", "Kcalloc");
@@ -5179,7 +5187,7 @@ SKIP_ADLRD_IRQ:
 	init_waitqueue_head(&cam_dev->shutdown_wq);
 
 	mtk_cam_get_chipid(cam_dev);
-
+	dev_info(dev, "[%d %s] platform = %s, probe done\n", __LINE__, __func__, platform_data->platform);
 	return 0;
 
 fail_return:
@@ -5198,6 +5206,8 @@ static int mtk_cam_remove(struct platform_device *pdev)
 
 	component_master_del(dev, &mtk_cam_master_ops);
 	mtk_cam_match_remove(dev);
+	if (cam_dev->ctxs != NULL)
+		vfree(cam_dev->ctxs);
 
 	mtk_cam_debug_deinit(&cam_dev->dbg);
 

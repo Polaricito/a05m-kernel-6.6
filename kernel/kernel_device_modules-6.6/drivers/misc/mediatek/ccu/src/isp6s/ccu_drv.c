@@ -1415,6 +1415,7 @@ static long ccu_ioctl(struct file *flip, unsigned int cmd,
 		break;
 
 err_copy_out:
+		--iova_buf_count;
 		dma_buf_unmap_attachment(ccu_iova[iova_buf_count].attach,
 			ccu_iova[iova_buf_count].sgt, DMA_BIDIRECTIONAL);
 

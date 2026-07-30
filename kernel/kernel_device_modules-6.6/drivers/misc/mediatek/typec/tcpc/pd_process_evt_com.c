@@ -288,6 +288,7 @@ static inline bool pd_process_ctrl_msg(
 
 	case PD_CTRL_NOT_SUPPORTED:
 		pd_cancel_dpm_reaction(pd_port);
+		pd_notify_pe_reset_protocol(pd_port);
 		pd_notify_tcp_event_2nd_result(
 				pd_port, TCP_DPM_RET_NOT_SUPPORT);
 
@@ -572,9 +573,6 @@ static inline bool pd_check_rx_pending(struct pd_port *pd_port)
 
 	if (mutex_is_locked(&tcpc->rxbuf_lock)) {
 		PE_INFO("rx_pending\n");
-		pending = true;
-	} else if (!pd_is_msg_empty(tcpc)) {
-		PE_INFO("rx_pending2\n");
 		pending = true;
 	}
 

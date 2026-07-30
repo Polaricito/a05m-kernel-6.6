@@ -323,6 +323,7 @@ static void dbg_deinit_chmux(struct seninf_ctx *ctx)
 	if (!ctx)
 		return;
 
+	mutex_lock(&ctx->dbg_chmux_mutex);
 	if (ctx->dbg_chmux_param) {
 		kfree(ctx->dbg_chmux_param->settings);
 		ctx->dbg_chmux_param->settings = NULL;
@@ -331,6 +332,7 @@ static void dbg_deinit_chmux(struct seninf_ctx *ctx)
 		kfree(ctx->dbg_chmux_param);
 		ctx->dbg_chmux_param = NULL;
 	}
+	mutex_unlock(&ctx->dbg_chmux_mutex);
 }
 
 static void dbg_init_chmux(struct seninf_ctx *ctx)
@@ -340,8 +342,10 @@ static void dbg_init_chmux(struct seninf_ctx *ctx)
 
 	dbg_deinit_chmux(ctx);
 
+	mutex_lock(&ctx->dbg_chmux_mutex);
 	ctx->dbg_chmux_param = kzalloc(sizeof(struct mtk_cam_seninf_mux_param),
 				       GFP_KERNEL);
+	mutex_unlock(&ctx->dbg_chmux_mutex);
 }
 
 static void dbg_commit_chmux(struct seninf_ctx *ctx)
@@ -349,8 +353,10 @@ static void dbg_commit_chmux(struct seninf_ctx *ctx)
 	if (!ctx)
 		return;
 
-	if (ctx->dbg_chmux_param)
+	mutex_lock(&ctx->dbg_chmux_mutex);
+	if (ctx->dbg_chmux_param && ctx->streaming)
 		mtk_cam_seninf_streaming_mux_change(ctx->dbg_chmux_param, false);
+	mutex_unlock(&ctx->dbg_chmux_mutex);
 }
 
 static void dbg_set_camtg(struct seninf_ctx *ctx, int pad_id, int camtg, int tag_id)
@@ -361,6 +367,7 @@ static void dbg_set_camtg(struct seninf_ctx *ctx, int pad_id, int camtg, int tag
 	if (!ctx)
 		return;
 
+	mutex_lock(&ctx->dbg_chmux_mutex);
 	if (ctx->dbg_chmux_param) {
 		num = ctx->dbg_chmux_param->num + 1;
 		if (num < 1) {
@@ -392,6 +399,7 @@ static void dbg_set_camtg(struct seninf_ctx *ctx, int pad_id, int camtg, int tag
 		mtk_cam_seninf_set_camtg_camsv(&ctx->subdev,
 					       pad_id, camtg, tag_id);
 	}
+	mutex_unlock(&ctx->dbg_chmux_mutex);
 }
 
 static ssize_t debug_ops_store(struct device *dev,
@@ -3522,6 +3530,7 @@ static int seninf_probe(struct platform_device *pdev)
 	ctx->open_refcnt = 0;
 	ctx->is_aov_enable = 0;
 	mutex_init(&ctx->mutex);
+	mutex_init(&ctx->dbg_chmux_mutex);
 
 	ret = get_csi_port(dev, &port);
 	if (ret) {
@@ -4273,6 +4282,7 @@ static int seninf_remove(struct platform_device *pdev)
 	v4l2_ctrl_handler_free(&ctx->ctrl_handler);
 
 	mutex_destroy(&ctx->mutex);
+	mutex_destroy(&ctx->dbg_chmux_mutex);
 
 	return 0;
 }
@@ -5143,7 +5153,6 @@ EXPORT_SYMBOL(mtk_cam_seninf_en_cdr_delay);
 int mtk_cam_seninf_s_cdr_delay(int cdr_delay)
 {
 	struct seninf_ctx *ctx = NULL;
-	char *eye_scan_log = NULL;
 
 	if (!cdr_core) {
 		pr_info("%s: seninf core is NULL\n", __func__);
@@ -5156,16 +5165,11 @@ int mtk_cam_seninf_s_cdr_delay(int cdr_delay)
 			dev_info(ctx->dev, "%s: sensor_idx %d port %d cdr_delay 0x%x\n",
 						__func__, get_sensor_idx(ctx), ctx->port, cdr_delay);
 
-			eye_scan_log = kzalloc(DEBUG_OPS_SHOW_LOG_SIZE + 1, GFP_KERNEL);
-			if (eye_scan_log != NULL)
-				g_seninf_ops->_eye_scan(ctx, EYE_SCAN_KEYS_CDR_DELAY, cdr_delay,
-							eye_scan_log, (int)DEBUG_OPS_SHOW_LOG_SIZE );
-			kfree(eye_scan_log);
+			cdr_core->cdr_delay_new = cdr_delay;
 		}
 	}
 	mutex_unlock(&cdr_core->mutex);
 
-	cdr_core->cdr_delay = cdr_delay;
 	return 0;
 }
 EXPORT_SYMBOL(mtk_cam_seninf_s_cdr_delay);

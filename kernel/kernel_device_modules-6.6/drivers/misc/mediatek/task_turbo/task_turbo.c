@@ -2112,7 +2112,7 @@ static void probe_android_vh_cgroup_set_task(void *ignore, int ret, struct task_
 	} else {
 		turbo_data = get_task_turbo_t(p);
 		if (turbo_data->turbo)
-			for_each_thread(p, t) {	
+			for_each_thread(p, t) {
 				turbo_data = get_task_turbo_t(t);
 				if (turbo_data->turbo)
 					remove_turbo_list(t);

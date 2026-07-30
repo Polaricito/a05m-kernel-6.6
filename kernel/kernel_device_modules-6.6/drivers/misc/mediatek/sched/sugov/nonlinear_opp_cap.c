@@ -2193,6 +2193,7 @@ int sysctl_sched_capacity_margin_dvfs = 20;
 unsigned int turn_point_util[MAX_NR_CPUS];
 unsigned int target_margin[MAX_NR_CPUS];
 unsigned int target_margin_low[MAX_NR_CPUS];
+bool switch_adap_margin_low[MAX_NR_CPUS] = {0};
 /*
  * set sched capacity margin for DVFS, Default = 20
  */
@@ -2281,7 +2282,7 @@ int set_turn_point_freq(int cpu, unsigned long freq)
 	int i = 0;
 	struct cpufreq_policy *policy;
 
-	if (cpu < 0 || cpu > MAX_NR_CPUS)
+	if (cpu < 0 || cpu > MAX_NR_CPUS - 1)
 		return -1;
 
 	if (freq == 0) {
@@ -2301,8 +2302,101 @@ int set_turn_point_freq(int cpu, unsigned long freq)
 }
 EXPORT_SYMBOL_GPL(set_turn_point_freq);
 
+static DEFINE_MUTEX(margin_low_mutex);
+static DEFINE_MUTEX(turn_point_freq_mutex);
+int set_turn_point_freq_with_wl(int cpu, unsigned long freq, int wl_type)
+{
+	int i = 0;
+	struct cpufreq_policy *policy;
+
+	if (cpu < 0 || cpu > MAX_NR_CPUS - 1)
+		return -1;
+
+	if (freq == 0) {
+		turn_point_util[cpu] = 0;
+		return 0;
+	}
+
+	if (freq == 1) {
+		turn_point_util[cpu] = 1;
+		return 0;
+	}
+
+	if (wl_type < 0 || wl_type >= nr_wl)
+		wl_type = wl_cpu_curr;
+
+	mutex_lock(&turn_point_freq_mutex);
+	policy = cpufreq_cpu_get(cpu);
+	if (policy) {
+		for_each_cpu(i, policy->related_cpus) {
+			turn_point_util[i] = pd_freq2util(cpu, freq, false, wl_type, NULL, true);
+		}
+		cpufreq_cpu_put(policy);
+	}
+	mutex_unlock(&turn_point_freq_mutex);
+	return 0;
+}
+EXPORT_SYMBOL_GPL(set_turn_point_freq_with_wl);
+
+int set_switch_adap_margin_low(int cpu,bool enable)
+{
+	struct cpufreq_policy *policy;
+	int i;
+
+	if (cpu < 0 || cpu > MAX_NR_CPUS - 1)
+		return -EINVAL;
+
+	mutex_lock(&margin_low_mutex);
+	policy = cpufreq_cpu_get(cpu);
+	if (policy) {
+		for_each_cpu(i, policy->related_cpus) {
+			switch_adap_margin_low[i] = enable;
+		}
+		cpufreq_cpu_put(policy);
+	}
+	mutex_unlock(&margin_low_mutex);
+	return 0;
+}
+EXPORT_SYMBOL_GPL(set_switch_adap_margin_low);
+
+bool get_switch_adap_margin_low(int cpu)
+{
+	if (cpu < 0 || cpu > MAX_NR_CPUS - 1)
+		return -EINVAL;
+
+	return switch_adap_margin_low[cpu];
+}
+EXPORT_SYMBOL_GPL(get_switch_adap_margin_low);
+
+unsigned int get_turn_point_util(int cpu)
+{
+	if (cpu < 0 || cpu > MAX_NR_CPUS - 1)
+		return -EINVAL;
+
+	return turn_point_util[cpu];
+}
+EXPORT_SYMBOL_GPL(get_turn_point_util);
+
+unsigned long get_turn_point_freq_with_wl(int cpu, int wl_type)
+{
+	if (wl_type < 0 || wl_type >= nr_wl)
+		wl_type = wl_cpu_curr;
+
+	if (cpu < 0 || cpu > MAX_NR_CPUS - 1)
+		return -EINVAL;
+
+	if (turn_point_util[cpu] == 0)
+		return 0;
+
+	return pd_util2freq(cpu, turn_point_util[cpu], false, wl_type);
+}
+EXPORT_SYMBOL_GPL(get_turn_point_freq_with_wl);
+
 inline unsigned long get_turn_point_freq(int cpu)
 {
+	if (cpu < 0 || cpu > MAX_NR_CPUS - 1)
+		return -EINVAL;
+
 	if (turn_point_util[cpu] == 0)
 		return 0;
 
@@ -2677,8 +2771,11 @@ void mtk_map_util_freq(void *data, unsigned long util, struct cpumask *cpumask,
 		orig_util >= turn_point_util[cpu])
 		util = max(turn_point_util[cpu], orig_util * target_margin[cpu]
 					>> SCHED_CAPACITY_SHIFT);
-	else if (turn_point_util[cpu] &&
-		orig_util < turn_point_util[cpu])
+	else if (turn_point_util[cpu] && orig_util < turn_point_util[cpu] &&
+			switch_adap_margin_low[cpu] && !legacy_api_support_get()){
+		mtk_map_util_freq_adap_grp(data, util, cpu, next_freq, cpumask);
+		return;
+	}else if (turn_point_util[cpu] && orig_util < turn_point_util[cpu])
 		util = min(turn_point_util[cpu], orig_util * target_margin_low[cpu]
 					>> SCHED_CAPACITY_SHIFT);
 
@@ -2734,7 +2831,8 @@ unsigned long mtk_cpu_util_next(int cpu, struct task_struct *p, int dst_cpu, int
 
 	if (is_runnable_boost_enable() && boost) {
 		runnable = READ_ONCE(cfs_rq->avg.runnable_avg);
-		util = max(util, runnable);
+		if (is_runnable_boost_all() || cpumask_test_cpu(cpu, get_runnable_boost_cpumask()))
+			util = max(util, runnable);
 	}
 
 	if (p && task_cpu(p) == cpu && dst_cpu != cpu)
@@ -2756,8 +2854,9 @@ unsigned long mtk_cpu_util_next(int cpu, struct task_struct *p, int dst_cpu, int
 	}
 
 	if (trace_sched_runnable_boost_enabled())
-		trace_sched_runnable_boost(is_runnable_boost_enable(), boost, cfs_rq->avg.util_avg,
-				cfs_rq->avg.util_est, runnable, util);
+		trace_sched_runnable_boost(is_runnable_boost_enable(), boost, is_runnable_boost_all(),
+				cpumask_test_cpu(cpu, get_runnable_boost_cpumask()),
+				cfs_rq->avg.util_avg,cfs_rq->avg.util_est, runnable, util);
 
 	return min(util, capacity_orig_of(cpu) + 1);
 }

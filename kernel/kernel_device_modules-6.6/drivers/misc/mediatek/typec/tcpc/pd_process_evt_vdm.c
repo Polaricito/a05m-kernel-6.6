@@ -567,10 +567,7 @@ static inline bool pd_process_data_msg(
 	if (PD_VDO_CMDT(vdm_hdr) == CMDT_INIT) {
 		pd_port->pe_vdm_state = pd_port->pe_pd_state;
 		pd_port->pe_state_curr = pd_port->pe_pd_state;
-
-#if PE_DBG_RESET_VDM_DIS == 0
 		PE_DBG("reset vdm_state\n");
-#endif /* if PE_DBG_RESET_VDM_DIS == 0 */
 	}
 
 	print_vdm_msg(pd_port, pd_event);
@@ -827,7 +824,7 @@ static inline bool pd_process_tcp_msg(
 
 	new_state = pd_event->msg - TCP_DPM_EVT_DISCOVER_ID;
 	if (new_state >= ARRAY_SIZE(tcp_vdm_evt_init_state)) {
-		PD_BUG_ON(1);
+		PD_WARN_ON(1);
 		return false;
 	}
 

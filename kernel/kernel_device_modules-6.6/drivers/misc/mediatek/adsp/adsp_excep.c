@@ -423,12 +423,9 @@ void adsp_aed_worker(struct work_struct *ws)
 		mtk_emidbg_dump();
 #endif
 		pr_info("%s, adsp dead, wait dump dead body", __func__);
-		if (is_infrabus_timeout())
-			BUG(); /* reboot for bus dump */
-		else
-			aee_kernel_exception_api(__FILE__, __LINE__, DB_OPT_DEFAULT,
-						 "[ADSP]",
-						 "ASSERT: ADSP DEAD! Recovery Fail");
+		aee_kernel_exception_api(__FILE__, __LINE__, DB_OPT_DEFAULT,
+					 "[ADSP]",
+					 "ASSERT: ADSP DEAD! Recovery Fail");
 	}
 #endif
 	adsp_disable_clock();

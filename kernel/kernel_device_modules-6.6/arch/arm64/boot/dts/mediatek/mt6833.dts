@@ -3273,6 +3273,17 @@
 	md1_sim2_hot_plug_eint:MD1-SIM2-HOT-PLUG-EINT {
 	};
 
+	md_ccif4@1024d000 {
+		compatible = "mediatek,md_ccif4";
+		reg = <0 0x1024d000 0 0x1000>;
+	};
+
+	md_ccif5@1025d000 {
+		compatible = "mediatek,md_ccif5";
+		reg = <0 0x1025d000 0 0x1000>;
+	};
+
+
 	watchdog: watchdog@10007000 {
 		compatible = "mediatek,mt6833-wdt",
 				"mediatek,mt6589-wdt",
@@ -4126,9 +4137,35 @@
 
 	low_battery_throttling {
 		compatible = "mediatek,low_battery_throttling";
-		hv_thd_volt = <3300>;
-		lv1_thd_volt = <3150>;
-		lv2_thd_volt = <3000>;
+		lvsys-thd-enable = <0>;
+		vbat-thd-enable = <1>;
+		bat0-thd-volts-l = <
+			3250 3100 2700
+			3250 3100 2700
+			3250 3100 2700
+			3250 3100 2700>;
+		bat0-thd-volts-h = <
+			3300 3150 3000
+			3300 3150 3000
+			3300 3150 3000
+			3300 3150 3000>;
+		bat1-thd-volts-l = <
+			3250 3100 2700
+			3250 3100 2700
+			3250 3100 2700
+			3250 3100 2700>;
+		bat1-thd-volts-h = <
+			3300 3150 3000
+			3300 3150 3000
+			3300 3150 3000
+			3300 3150 3000>;
+		temperature-stage-threshold = <25 10 0>;
+		throttle-level = <0 1 2 3>,
+					<0 1 2 3>,
+					<0 1 2 3>,
+					<0 1 2 3>;
+		bootmode = <&chosen>;
+		gauge = <&mtk_gauge>;
 	};
 
 	pbm: pbm {
@@ -4141,8 +4178,16 @@
 
 	cpu_power_throttling: cpu_power_throttling {
 		compatible = "mediatek,cpu-power-throttling";
-		lbat_cpu_limit = <900000 900000 1300000>;
-		oc_cpu_limit = <900000 900000 1300000>;
+		lbat-max-level = <2>;
+		lbat-limit-freq-lv1 = < 2147483647  2147483647 2147483647>;
+		lbat-limit-freq-lv2 = < 900000  900000 1300000>;
+
+		oc-max-level = <2>;
+		oc-limit-freq-lv1 = < 2147483647  2147483647 2147483647>;
+		oc-limit-freq-lv2 = < 900000  900000 900000>;
+
+		soc-max-level = <1>;
+		soc-limit-freq-lv1 = < 2147483647  2147483647 2147483647>;
 	};
 
 	md_power_throttling: md_power_throttling {
@@ -4151,13 +4196,15 @@
 		oc_md_reduce_tx = <6>;
 	};
 
-	bp_thl: bp_thl {
+	bp_thl: bp-thl {
 		compatible = "mediatek,mtk-bp-thl";
-		soc_limit = <15>;
-		soc_limit_ext = <20>;
-		soc_limit_ext_release = <25>;
-	};
 
+		max-throttle-level = <2>;
+		soc-throttle-level = < 0 1>;
+
+		soc-max-stage = <1>;
+		soc-limit-threshold = <15>;
+	};
 	therm_ctrl@1100b000 {
 		compatible = "mediatek,therm_ctrl";
 		reg = <0 0x1100b000 0 0x1000>;
@@ -7229,7 +7276,6 @@ gpufreq: gpufreq {
 	mt6360_typec: tcpc@4e {
 		compatible = "mediatek,mt6360_typec";
 		reg = <0x4e>;
-		mt-dual,supported_modes = <0>; /* 0: dfp/ufp, 1: dfp, 2: ufp */
 		mt-tcpc,name = "type_c_port0"; /* tcpc_device's name */
 		/* 0: Unknown, 1: SNK, 2: SRC, 3: DRP, 4: Try.SRC, 5: Try.SNK  6: NR */
 		mt-tcpc,role-def = <5>;
@@ -7244,14 +7290,22 @@ gpufreq: gpufreq {
 		interrupts = <64 0>;
 		interrupt-names = "usbid_evt";
 		charger = <&mt6360_chg>;
-		bootmode = <&chosen>;
-		/* switch = <&typec_mux_switch>; */
 		pd-data {
 			pd,vid = <0x29cf>;
 			pd,pid = <0x6360>;
-			pd,source-cap-ext =
-				<0x636029cf 0x00000000 0x00000000
-				 0x00000000 0x00000000 0x07000000>;
+			pd,source-cap-ext = /bits/ 8 <0xcf 0x29 0x60 0x63
+						      0x00 0x00 0x00 0x00
+						      0x00 0x00 0x00 0x00
+						      0x00 0x00 0x00 0x00
+						      0x00 0x00 0x00 0x00
+						      0x00 0x00 0x01 0x07
+						      0x00>;
+			pd,sink-cap-ext = /bits/ 8 <0xcf 0x29 0x60 0x63
+						    0x00 0x00 0x00 0x00
+						    0x00 0x00 0x01 0x00
+						    0x00 0x00 0x00 0x00
+						    0x01 0x0b 0x01 0x0a
+						    0x0a 0x00 0x00 0x00>;
 			pd,mfrs = "RichtekTCPC";
 
 			/*
@@ -7259,7 +7313,7 @@ gpufreq: gpufreq {
 			 *	MAX_POWER_LV = 0x21, MAX_POWER_LVIC = 0x31
 			 *	MAX_POWER_HV = 0x41, MAX_POWER_HVIC = 0x51
 			 */
-			pd,charging-policy= <0x31>;
+			pd,charging-policy = <0x31>;
 
 			/*
 			 * Fixed 5V, 500 mA <0x00019032>
@@ -7285,19 +7339,19 @@ gpufreq: gpufreq {
 			pd,sink-pdo-data = <0x000190c8 0x0002d0a7>;
 
 			/*
-			 * No DP, host + device
+			 * No DP Sink capability
 			 *	pd,id-vdo-size = <6>;
 			 *	pd,id-vdo-data = <0xd14029cf 0x0 0x63600000
-						 0x41800000 0x0 0x21800000>;
-			 * With DP
+						  0x61000000 0x0 0x41000000>;
+			 * With DP Sink capability
 			 *	pd,id-vdo-size = <6>;
 			 *	pd,id-vdo-data = <0xd54029cf 0x0 0x63600000
-						 0x41800000 0x0 0x21800000>;
+						  0x61000000 0x0 0x41000000>;
 			 */
 
 			pd,id-vdo-size = <6>;
 			pd,id-vdo-data = <0xd14029cf 0x0 0x63600000
-					  0x41800000 0x0 0x21800000>;
+					  0x61000000 0x0 0x41000000>;
 
 			bat,nr = <1>;
 			bat-info0 {
@@ -7324,14 +7378,14 @@ gpufreq: gpufreq {
 			//attempt-discover-cable;
 			//attempt-discover-id;
 
-			/* 0: disable, 1: prefer_snk, 2: prefer_src */
+			/* 0: disable, 1: prefer-snk, 2: prefer-src */
 			pr-check = <0>;
 			// pr-reject-as-source;
 			// pr-reject-as-sink;
 			// pr-check-gp-source;
 			// pr-check-gp-sink;
 
-			/* 0: disable, 1: prefer_ufp, 2: prefer_dfp */
+			/* 0: disable, 1: prefer-ufp, 2: prefer-dfp */
 			dr-check = <0>;
 			// dr-reject-as-dfp;
 			// dr-reject-as-ufp;
@@ -7340,24 +7394,17 @@ gpufreq: gpufreq {
 			/* connection type = "both", "ufp-d", "dfp-d" */
 			1st-connection = "dfp-d";
 			2nd-connection = "dfp-d";
-			signal,dp-v13;
-			//signal,dp_gen2;
-			//usbr20-not-used;
+			// usbr20-not-used;
 			typec,receptacle;
 			ufp-d {
-				//pin-assignment,mode-a;
-				//pin-assignment,mode-b;
-				//pin-assignment,mode-c;
-				//pin-assignment,mode-d;
-				//pin-assignment,mode-e;
+				// pin-assignment,mode-c;
+				// pin-assignment,mode-d;
+				// pin-assignment,mode-e;
 			};
 			dfp-d {
-				//pin_assignment,mode_a;
-				//pin_assignment,mode_b;
 				pin-assignment,mode-c;
 				pin-assignment,mode-d;
 				pin-assignment,mode-e;
-				//pin_assignment,mode_f;
 			};
 		};
 	};

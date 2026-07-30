@@ -182,6 +182,18 @@ static struct audio_dsp_dram
 };
 
 static struct audio_dsp_dram
+	adsp_sharemem_direct_mblock[ADSP_TASK_SHAREMEM_NUM] = {
+		{
+			.size = 0x400, /* 1024 bytes */
+			.phy_addr = 0,
+		},
+		{
+			.size = 0x400, /* 1024 bytes */
+			.phy_addr = 0,
+		},
+};
+
+static struct audio_dsp_dram
 	adsp_sharemem_ktv_mblock[ADSP_TASK_SHAREMEM_NUM] = {
 		{
 			.size = 0x400, /* 1024 bytes */
@@ -363,6 +375,18 @@ static struct audio_dsp_dram
 
 static struct audio_dsp_dram
 	adsp_sharemem_fast_media_mblock[ADSP_TASK_SHAREMEM_NUM] = {
+		{
+			.size = 0x400, /* 1024 bytes */
+			.phy_addr = 0,
+		},
+		{
+			.size = 0x400, /* 1024 bytes */
+			.phy_addr = 0,
+		},
+};
+
+static struct audio_dsp_dram
+	adsp_sharemem_separate_mblock[ADSP_TASK_SHAREMEM_NUM] = {
 		{
 			.size = 0x400, /* 1024 bytes */
 			.phy_addr = 0,
@@ -689,6 +713,7 @@ static struct mtk_adsp_task_attr adsp_task_attr[AUDIO_TASK_DAI_NUM] = {
 				      CALL_FINAL_FEATURE_ID, false},
 	[AUDIO_TASK_FAST_ID] = {false, -1, -1, -1, FAST_FEATURE_ID, false},
 	[AUDIO_TASK_SPATIALIZER_ID] = {false, -1, -1, -1, SPATIALIZER_FEATURE_ID, false},
+	[AUDIO_TASK_DIRECT_ID] = {false, -1, -1, -1, DIRECT_FEATURE_ID, false},
 	[AUDIO_TASK_KTV_ID] = {true, -1, -1, -1, KTV_FEATURE_ID, false},
 	[AUDIO_TASK_CAPTURE_RAW_ID] = {false, -1, -1, -1,
 				       CAPTURE_RAW_FEATURE_ID, false},
@@ -713,6 +738,8 @@ static struct mtk_adsp_task_attr adsp_task_attr[AUDIO_TASK_DAI_NUM] = {
 	[AUDIO_TASK_CALLUL_ID] = {true, -1, -1, -1,
 				VOICE_CALL_FEATURE_ID, false},
 	[AUDIO_TASK_FAST_MEDIA_ID] = {false, -1, -1, -1, FAST_MEDIA_FEATURE_ID, false},
+	[AUDIO_TASK_SEPARATE_ID] = {false, -1, -1, -1,
+				    SEPARATE_FEATURE_ID, false},
 #if IS_ENABLED(CONFIG_MTK_ADSP_AUTO_HFP_CLIENT_SUPPORT)
 	[AUDIO_TASK_HFP_CLIENT_RX_ADSP_ID] = {true, -1, -1, -1,
 				HFP_CLIENT_RX_FEATURE_ID, false},
@@ -803,6 +830,8 @@ static struct audio_dsp_dram *mtk_get_adsp_sharemem_block(int audio_task_id)
 		return adsp_sharemem_fast_mblock;
 	case AUDIO_TASK_SPATIALIZER_ID:
 		return adsp_sharemem_spatializer_mblock;
+	case AUDIO_TASK_DIRECT_ID:
+		return adsp_sharemem_direct_mblock;
 	case AUDIO_TASK_KTV_ID:
 		return adsp_sharemem_ktv_mblock;
 	case AUDIO_TASK_CAPTURE_RAW_ID:
@@ -835,6 +864,8 @@ static struct audio_dsp_dram *mtk_get_adsp_sharemem_block(int audio_task_id)
 		return adsp_sharemem_callul_mblock;
 	case AUDIO_TASK_FAST_MEDIA_ID:
 		return adsp_sharemem_fast_media_mblock;
+	case AUDIO_TASK_SEPARATE_ID:
+		return adsp_sharemem_separate_mblock;
 #if IS_ENABLED(CONFIG_MTK_ADSP_AUTO_HFP_CLIENT_SUPPORT)
 	case AUDIO_TASK_HFP_CLIENT_RX_ADSP_ID:
 		return adsp_sharemem_hfp_client_rx_mblock;

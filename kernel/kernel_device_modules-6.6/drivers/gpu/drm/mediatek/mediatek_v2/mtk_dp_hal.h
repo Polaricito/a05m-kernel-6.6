@@ -328,6 +328,7 @@ void mhal_DPTx_SetTU_SramRdStart(struct mtk_dp *mtk_dp, WORD uwValue);
 void mhal_DPTx_SetSDP_DownCntinitInHblanking(struct mtk_dp *mtk_dp,
 	WORD uwValue);
 void mhal_DPTx_SetSDP_DownCntinit(struct mtk_dp *mtk_dp, WORD uwValue);
+void mhal_DPTx_SetSDP_ASPCntinit(struct mtk_dp *mtk_dp, const WORD val);
 void mhal_DPTx_SetTU_SetEncoder(struct mtk_dp *mtk_dp);
 void mhal_DPTx_SetMSA(struct mtk_dp *mtk_dp);
 void mhal_DPTx_SetMISC(struct mtk_dp *mtk_dp, BYTE ucMISC[2]);
@@ -340,6 +341,7 @@ void mhal_DPTx_SPKG_VSC_EXT_VESA(struct mtk_dp *mtk_dp, bool bEnable,
 void mhal_DPTx_SPKG_VSC_EXT_CEA(struct mtk_dp *mtk_dp, bool bEnable,
 	BYTE ucHDR_NUM, BYTE *pDB);
 BYTE mhal_DPTx_GetHPDIRQStatus(struct mtk_dp *mtk_dp);
+void mhal_DPTx_audio_sample_arrange(struct mtk_dp *mtk_dp, BYTE bEnable);
 void mhal_DPTx_Audio_PG_EN(struct mtk_dp *mtk_dp, BYTE Channel, BYTE Fs,
 	BYTE bEnable);
 void mhal_DPTx_Audio_TDM_PG_EN(struct mtk_dp *mtk_dp, BYTE Channel, BYTE Fs,
@@ -355,5 +357,6 @@ void mhal_DPTx_DataLanePNSwap(struct mtk_dp *mtk_dp, bool bENABLE);
 void mhal_DPTx_SetAuxSwap(struct mtk_dp *mtk_dp, bool enable);
 void mhal_DPTx_Set_BS2BS_Cnt(struct mtk_dp *mtk_dp, bool bEnable, DWORD uiHTT);
 void mhal_DPTx_PhyTrainingConfig(struct mtk_dp *mtk_dp, u8 ubTargetLinkRate, u8 ubTargetLaneCount);
+void mhal_DPTx_Set_Audio_N_Half(struct mtk_dp *mtk_dp);
 
 #endif //__DRTX_HAL_H__

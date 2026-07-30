@@ -106,8 +106,8 @@ static int32_t powered;
 static int32_t isconcurrent;
 static char *ifname = WLAN_IFACE_NAME;
 static uint32_t driver_loaded;
-static int32_t low_latency_mode;
-static int32_t wifi_standalone_log_mode;
+static uint32_t low_latency_mode;
+static uint32_t wifi_standalone_log_mode;
 #if !IS_ENABLED(CFG_SUPPORT_CONNAC1X)
 enum {
 	WRITE_PROCESSING_DONE,
@@ -204,7 +204,7 @@ uint32_t get_low_latency_mode(void)
 }
 EXPORT_SYMBOL(get_low_latency_mode);
 
-void set_wifi_standalone_log_mode(const int mode)
+void set_wifi_standalone_log_mode(const uint32_t mode)
 {
 	wifi_standalone_log_mode = mode;
 }

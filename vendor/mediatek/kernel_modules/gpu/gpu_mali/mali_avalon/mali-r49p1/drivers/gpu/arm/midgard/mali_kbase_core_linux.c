@@ -3651,6 +3651,45 @@ static ssize_t gpuinfo_show(struct device *dev, struct device_attribute *attr, c
 }
 static DEVICE_ATTR_RO(gpuinfo);
 
+
+#if IS_ENABLED(CONFIG_MALI_MTK_UNHANDLED_PAGE_FAULT_DEBUG)
+static ssize_t upf_counter_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct kbase_device *kbdev;
+
+	CSTD_UNUSED(attr);
+
+	kbdev = to_kbase_device(dev);
+	if (!kbdev)
+		return -ENODEV;
+
+	return scnprintf(buf, PAGE_SIZE, "upf_counter = %lld\n", mtk_common_upf_counter_get());
+}
+static ssize_t upf_counter_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct kbase_device *kbdev = dev_get_drvdata(dev);
+	u32 reset_value;
+
+	CSTD_UNUSED(attr);
+
+	if (!kbdev) {
+		pr_info("[KBASE] Bad kbdev!\n");
+		return -ENODEV;
+	}
+
+	if (kstrtouint(buf, 0, &reset_value))
+		return -EINVAL;
+
+	if (reset_value == 0) {
+		mtk_common_upf_counter_reset();
+	}
+
+	return count;
+}
+static DEVICE_ATTR_RW(upf_counter);
+#endif /* CONFIG_MALI_MTK_UNHANDLED_PAGE_FAULT_DEBUG */
+
+
 /**
  * dvfs_period_store - Store callback for the dvfs_period sysfs file.
  * @dev:   The device with sysfs file is for
@@ -6298,6 +6337,9 @@ static struct attribute *kbase_attrs[] = {
 #if IS_ENABLED(CONFIG_MALI_MTK_ACP_FORCE_SYNC_DEBUG)
 	&dev_attr_force_cache_sync.attr,
 #endif /* CONFIG_MALI_MTK_ACP_FORCE_SYNC_DEBUG */
+#if IS_ENABLED(CONFIG_MALI_MTK_UNHANDLED_PAGE_FAULT_DEBUG)
+	&dev_attr_upf_counter.attr,
+#endif /* CONFIG_MALI_MTK_UNHANDLED_PAGE_FAULT_DEBUG */
 	NULL
 };
 
@@ -6320,6 +6362,10 @@ static const struct attribute_group kbase_mempool_attr_group = {
 static const struct attribute_group kbase_attr_group = {
 	.attrs = kbase_attrs,
 };
+
+#if MALI_USE_CSF
+#define SYSFS_CSF_MEM_COMPR_DIR "mem_compr"
+#endif
 
 int kbase_sysfs_init(struct kbase_device *kbdev)
 {
@@ -6353,11 +6399,32 @@ int kbase_sysfs_init(struct kbase_device *kbdev)
 	mtk_common_sysfs_init(kbdev);
 #endif /* CONFIG_MALI_MTK_SYSFS */
 
+#if MALI_USE_CSF
+	if (IS_ENABLED(CONFIG_MALI_MEMORY_COMPRESSION)) {
+		kbdev->mcompr_kobj = kobject_create_and_add(SYSFS_CSF_MEM_COMPR_DIR, &kbdev->dev->kobj);
+		if (!kbdev->mcompr_kobj) {
+			kobject_put(kbdev->mcompr_kobj);
+			sysfs_remove_group(&kbdev->dev->kobj, &kbase_mempool_attr_group);
+			sysfs_remove_group(&kbdev->dev->kobj, &kbase_scheduling_attr_group);
+			sysfs_remove_group(&kbdev->dev->kobj, &kbase_attr_group);
+			dev_err(kbdev->dev, "Creation of %s sysfs sub-directory failed\n",
+				SYSFS_CSF_MEM_COMPR_DIR);
+			return -ENOMEM;
+		}
+	}
+#endif
 	return err;
 }
 
 void kbase_sysfs_term(struct kbase_device *kbdev)
 {
+#if MALI_USE_CSF
+	if (IS_ENABLED(CONFIG_MALI_MEMORY_COMPRESSION)) {
+		kobject_del(kbdev->mcompr_kobj);
+		kobject_put(kbdev->mcompr_kobj);
+	}
+#endif
+
 #if IS_ENABLED(CONFIG_MALI_MTK_SYSFS)
 	mtk_common_sysfs_term(kbdev);
 #endif /* CONFIG_MALI_MTK_SYSFS */

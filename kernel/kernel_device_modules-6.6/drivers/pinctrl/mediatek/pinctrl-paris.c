@@ -584,7 +584,7 @@ ssize_t mtk_pctrl_show_one_pin(struct mtk_pinctrl *hw,
 	unsigned int gpio, char *buf, unsigned int bufLen)
 {
 	int pullup = 0, pullen = 0, r1 = -1, r0 = -1, len = 0, rsel = -1;
-	int pinmux, val;
+	int pinmux, val, eh;
 	const struct mtk_pin_desc *desc;
 
 	if (gpio >= hw->soc->npins)
@@ -675,6 +675,10 @@ ssize_t mtk_pctrl_show_one_pin(struct mtk_pinctrl *hw,
 	else
 		len += snprintf(buf + len, bufLen - len, "%1d%1d",
 			pullen, pullup);
+
+	val = mtk_pinconf_adv_drive_get(hw, desc, &eh);
+	if (val >= 0)
+		len += snprintf(buf + len, bufLen - len, " [EH:%02d]", eh);
 
 	return len;
 }

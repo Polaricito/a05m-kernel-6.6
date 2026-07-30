@@ -709,7 +709,7 @@ void ppm_cobra_tbl_updating(void)
 		unsigned int core, dyn, lkg, dyn_c, lkg_c, cap;
 
 		/* generate basic power table */
-		ppm_ver("basic power table:\n");
+		ppm_ver("[%s] basic power table:\n", __func__);
 		for (i = 0; i < TOTAL_CORE_NUM; i++) {
 			for (j = 0; j < DVFS_OPP_NUM; j++) {
 				core = (i % CORE_NUM_L) + 1;

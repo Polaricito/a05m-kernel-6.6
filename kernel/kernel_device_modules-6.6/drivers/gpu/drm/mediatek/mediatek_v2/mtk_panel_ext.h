@@ -141,6 +141,8 @@ struct mtk_lcm_dsi_cmd_packet {
 	struct list_head cmd_list;
 };
 
+extern int set_lcm(struct cmdq_pkt *handle, struct mtk_ddic_dsi_msg *cmd_msg);
+
 typedef  void (*mtk_dsi_ddic_handler_cb)(struct cmdq_cb_data data);
 typedef void (*dcs_write_gce) (struct mtk_dsi *dsi, struct cmdq_pkt *handle,
 				const void *data, size_t len);

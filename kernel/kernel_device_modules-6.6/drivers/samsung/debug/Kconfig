@@ -82,3 +82,10 @@ config SEC_DEBUG_PRINT_UART_TXRX
 	help
 	  This option is enabled by Factory build option and
 	  print uart tx/rx information to kernel log
+
+config SEC_DEBUG_LEGACY_LK_RESET
+	bool "Support Save Last_Kmsg with legacy lk reset concept"
+	default n
+	help
+	  To support legacy reset concept of lk
+

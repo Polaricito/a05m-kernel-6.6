@@ -1472,9 +1472,15 @@ int mmdvfs_set_vcp_test(const char *val, const struct kernel_param *kp)
 		return -EINVAL;
 	}
 
+	if (func == TEST_SET_RATE)
+		if (idx >= MMDVFS_USER_NUM) {
+			MMDVFS_ERR("func:%hhu invalid idx:%hhu opp:%d", func, idx, opp);
+			return -EINVAL;
+		}
+
 	if (func == TEST_AP_SET_OPP || func == TEST_AP_SET_USER_RATE) {
 		if (idx >= MMDVFS_USER_NUM) {
-			MMDVFS_ERR("invalid idx:%hhu opp:%d", idx, opp);
+			MMDVFS_ERR("func:%hhu invalid idx:%hhu opp:%d", func, idx, opp);
 			return -EINVAL;
 		}
 
@@ -2415,7 +2421,7 @@ static unsigned long mmdvfs_mux_get_rate(const char *name)
 
 	if (i >= ARRAY_SIZE(mmdvfs_user)) {
 		MMDVFS_ERR("invalid name:%s", name);
-		return -EINVAL;
+		return ~0UL;
 	}
 
 	if (log_level & (1 << log_clk_ops))

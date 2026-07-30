@@ -205,6 +205,7 @@ struct seninf_core {
 	bool is_porting_muxvr_range;
 
 	int cdr_delay;
+	int cdr_delay_new;
 
 	spinlock_t spinlock_irq;
 	spinlock_t spinlock_aov;
@@ -417,6 +418,7 @@ struct seninf_ctx {
 
 	/* cammux switch debug element */
 	struct mtk_cam_seninf_mux_param *dbg_chmux_param;
+	struct mutex dbg_chmux_mutex;
 #ifdef ERR_DETECT_TEST
 	unsigned int test_cnt;
 #endif

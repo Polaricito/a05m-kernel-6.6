@@ -27,12 +27,15 @@
 #include <linux/module.h>
 #include <linux/pm_domain.h>
 #include <linux/device.h>
+#include <video/videomode.h>
 
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_crtc.h>
 #include <drm/drm_crtc_helper.h>
 #include <drm/drm_edid.h>
 #include <drm/display/drm_dp_helper.h>
+#include <drm/display/drm_hdcp_helper.h>
+#include <drm/display/drm_hdmi_helper.h>
 #include <uapi/drm/mediatek_drm.h>
 #include <drm/drm_probe_helper.h>
 #include <drm/drm_modes.h>
@@ -49,6 +52,12 @@
 #endif
 
 #define DPTX_IRQ_SUPPORT (0)
+#define OFFSET(m, n) ((m > n) ? (m - n) : 0)
+#define VBLANK_LIMIT_VALUE (50)
+#define FPS_LIMIT_VALUE (144)
+#define VTOTAL_LIMIT_VALUE (1490)
+#define US_PER_SEC (1000000)
+#define VBK_LIMITE_US (US_PER_SEC*VBLANK_LIMIT_VALUE/FPS_LIMIT_VALUE/VTOTAL_LIMIT_VALUE)
 
 static struct mtk_dp *g_mtk_dp;
 static bool fakecablein;
@@ -303,6 +312,11 @@ bool mdrv_DPTx_AuxWrite_Bytes(struct mtk_dp *mtk_dp, u8 ubCmd,
 	do {
 		bReplyStatus = mhal_DPTx_AuxWrite_Bytes(mtk_dp, ubCmd,
 			usDPCDADDR, ubLength, pData);
+
+		if ((ubCmd == DP_AUX_I2C_WRITE || ubCmd == DP_AUX_I2C_MOT) &&
+		usDPCDADDR == DDC_ADDR)
+			return bReplyStatus ? false : true;
+
 		ubRetryLimit--;
 		if (bReplyStatus) {
 			udelay(50);
@@ -439,8 +453,8 @@ void mdrv_DPTx_deinit(struct mtk_dp *mtk_dp)
 {
 	mdrv_DPTx_VideoMute(mtk_dp, true);
 	mdrv_DPTx_AudioMute(mtk_dp, true);
-	mhal_DPTx_VideoMuteSW(mtk_dp, true);
 	cancel_work_sync(&mtk_dp->hdcp_work);
+	mtk_dp->hdcp_enable = false;
 
 	mtk_dp->training_info.ucCheckCapTimes = 0;
 	mtk_dp->video_enable = false;
@@ -480,10 +494,13 @@ void mdrv_DPTx_InitVariable(struct mtk_dp *mtk_dp)
 	mtk_dp->state = DPTXSTATE_INITIAL;
 	mtk_dp->state_pre = DPTXSTATE_INITIAL;
 	mtk_dp->info.input_src = DPTX_SRC_DPINTF;
-	mtk_dp->info.format = DP_COLOR_FORMAT_RGB_444;
-	mtk_dp->info.depth = DP_COLOR_DEPTH_8BIT;
-	if (!mtk_dp->info.bPatternGen)
+	if (mtk_dp->info.bPatternGen)
+		DPTXMSG("Use dptx mac pattern gen format and depth\n");
+	else {
+		mtk_dp->info.format = DP_COLOR_FORMAT_RGB_444;
+		mtk_dp->info.depth = DP_COLOR_DEPTH_8BIT;
 		mtk_dp->info.resolution = SINK_1920_1080;
+	}
 	mtk_dp->info.bSetAudioMute = false;
 	mtk_dp->info.bSetVideoMute = false;
 	memset(&mtk_dp->info.DPTX_OUTBL, 0,
@@ -496,6 +513,8 @@ void mdrv_DPTx_InitVariable(struct mtk_dp *mtk_dp)
 	mtk_dp->has_fec   = false;
 	mtk_dp->dsc_enable = false;
 	mtk_dp->fake_comeplete_irq = false;
+	mtk_dp->hdcp_enable = false;
+	mtk_dp->conn.hdr_sink_metadata.hdmi_type1.metadata_type = 0;
 
 	// for customer requirement(set max link rate)
 	//mtk_dp->training_info.ubSysMaxLinkRate = DP_LINKRATE_HBR;
@@ -504,75 +523,98 @@ void mdrv_DPTx_InitVariable(struct mtk_dp *mtk_dp)
 		mdrv_DPTx_CheckMaxLinkRate(mtk_dp);
 }
 
+void mdrv_DPTx_SetSDP_ASPCntinit(struct mtk_dp *mtk_dp)
+{
+	u16 usSDP_Down_ASP_Cnt_Init = 0x0000;
+
+	mtk_dp->info.DPTX_OUTBL.Hbk =
+		mtk_dp->info.DPTX_OUTBL.Htt -
+		mtk_dp->info.DPTX_OUTBL.Hde;
+
+	if (mtk_dp->info.DPTX_OUTBL.PixRateKhz > 0) {
+		if (mtk_dp->training_info.ubLinkRate <= DP_LINKRATE_HBR3)
+			usSDP_Down_ASP_Cnt_Init =
+				mtk_dp->info.DPTX_OUTBL.Hbk *
+				mtk_dp->training_info.ubLinkRate * 27 * 250 /
+					(mtk_dp->info.DPTX_OUTBL.PixRateKhz) * 8 / 10;
+		else
+			usSDP_Down_ASP_Cnt_Init =
+				mtk_dp->info.DPTX_OUTBL.Hbk *
+				mtk_dp->training_info.ubLinkRate * 10 * 1000 / 32 * 250 /
+					(mtk_dp->info.DPTX_OUTBL.PixRateKhz) * 8 / 10;
+	}
+
+	mhal_DPTx_SetSDP_ASPCntinit(mtk_dp, usSDP_Down_ASP_Cnt_Init);
+}
+
 void mdrv_DPTx_SetSDP_DownCntinit(struct mtk_dp *mtk_dp,
 	u16 Sram_Read_Start)
 {
-	u16 SDP_Down_Cnt_Init = 0x0000;
-	u8 ucDCOffset;
+	u32 sdp_down_cnt = 0;
 
-	if (mtk_dp->info.DPTX_OUTBL.PixRateKhz > 0)
-		SDP_Down_Cnt_Init = (Sram_Read_Start *
-			mtk_dp->training_info.ubLinkRate * 2700 * 8)
-			/ (mtk_dp->info.DPTX_OUTBL.PixRateKhz * 4);
+	/* sram_read_start * lane_cnt * 2(pixelperaddr) * link_rate / pixel_clock * 0.8(margin) */
+	sdp_down_cnt = (u32)(Sram_Read_Start * mtk_dp->training_info.ubLinkLaneCount * 2
+			* mtk_dp->training_info.ubLinkRate * 2700 * 8)
+			/ mtk_dp->info.DPTX_OUTBL.PixRateKhz;
+
+	if (mtk_dp->info.format == DP_COLOR_FORMAT_YUV_420)
+		sdp_down_cnt = sdp_down_cnt / 2;
 
 	switch (mtk_dp->training_info.ubLinkLaneCount) {
 	case DP_LANECOUNT_1:
-		SDP_Down_Cnt_Init = (SDP_Down_Cnt_Init > 0x1A) ?
-			SDP_Down_Cnt_Init : 0x1A;  //26
+		sdp_down_cnt = (sdp_down_cnt > 0x1E) ? sdp_down_cnt : 0x1E;
 		break;
+
 	case DP_LANECOUNT_2:
-		// case for LowResolution && High Audio Sample Rate
-		ucDCOffset = (mtk_dp->info.DPTX_OUTBL.Vtt <= 525) ?
-			0x04 : 0x00;
-		SDP_Down_Cnt_Init = (SDP_Down_Cnt_Init > 0x10) ?
-			SDP_Down_Cnt_Init : 0x10 + ucDCOffset; //20 or 16
+		sdp_down_cnt = (sdp_down_cnt > 0x14) ? sdp_down_cnt : 0x14;
 		break;
+
 	case DP_LANECOUNT_4:
-		SDP_Down_Cnt_Init = (SDP_Down_Cnt_Init > 0x06) ?
-			SDP_Down_Cnt_Init : 0x06; //6
+		sdp_down_cnt = (sdp_down_cnt > 0x08) ? sdp_down_cnt : 0x08;
 		break;
+
 	default:
-		SDP_Down_Cnt_Init = (SDP_Down_Cnt_Init > 0x06) ?
-			SDP_Down_Cnt_Init : 0x06;
+		sdp_down_cnt = (sdp_down_cnt > 0x08) ? sdp_down_cnt : 0x08;
 		break;
 	}
 
-	DPTXMSG("PixRateKhz = %lu SDP_DC_Init = %x\n",
-		mtk_dp->info.DPTX_OUTBL.PixRateKhz, SDP_Down_Cnt_Init);
-
-	mhal_DPTx_SetSDP_DownCntinit(mtk_dp, SDP_Down_Cnt_Init);
+	DPTXMSG("pix_clk_khz = %lu sdp_down_cnt = %x\n",
+		 mtk_dp->info.DPTX_OUTBL.PixRateKhz, sdp_down_cnt);
+	mhal_DPTx_SetSDP_DownCntinit(mtk_dp, sdp_down_cnt);
 }
 
 void mdrv_DPTx_SetSDP_DownCntinitInHblanking(struct mtk_dp *mtk_dp)
 {
-	int PixClkMhz;
-	u8 ucDCOffset;
+	u32 sdp_down_cnt;
 
-	PixClkMhz = (mtk_dp->info.format == DP_COLOR_FORMAT_YUV_420) ?
-		mtk_dp->info.DPTX_OUTBL.PixRateKhz/2000 :
-		mtk_dp->info.DPTX_OUTBL.PixRateKhz/1000;
+	/* hblank * link_rate / pixel_clock * 0.8(margin) / 4(1T4B) */
+	sdp_down_cnt = (u32)((mtk_dp->info.DPTX_OUTBL.Htt
+							-mtk_dp->info.DPTX_OUTBL.Hde)
+			* mtk_dp->training_info.ubLinkRate * 2700 * 2)
+			/ mtk_dp->info.DPTX_OUTBL.PixRateKhz;
+
+	if (mtk_dp->info.format == DP_COLOR_FORMAT_YUV_420)
+		sdp_down_cnt = sdp_down_cnt / 2;
 
 	switch (mtk_dp->training_info.ubLinkLaneCount) {
 	case DP_LANECOUNT_1:
-		mhal_DPTx_SetSDP_DownCntinitInHblanking(mtk_dp, 0x0020);
+		sdp_down_cnt = (sdp_down_cnt > 0x1E) ? sdp_down_cnt : 0x1E;
 		break;
+
 	case DP_LANECOUNT_2:
-		ucDCOffset = (mtk_dp->info.DPTX_OUTBL.Vtt <= 525) ? 0x14 : 0x00;
-		mhal_DPTx_SetSDP_DownCntinitInHblanking(mtk_dp,
-			0x0018 + ucDCOffset);
+		sdp_down_cnt = (sdp_down_cnt > 0x14) ? sdp_down_cnt : 0x14;
 		break;
+
 	case DP_LANECOUNT_4:
-		ucDCOffset = (mtk_dp->info.DPTX_OUTBL.Vtt <= 525) ? 0x08 : 0x00;
-		if (PixClkMhz > (mtk_dp->training_info.ubLinkRate * 27)) {
-			mhal_DPTx_SetSDP_DownCntinitInHblanking(mtk_dp, 0x0008);
-			DPTXMSG("Pixclk > LinkRateChange\n");
-		} else {
-			mhal_DPTx_SetSDP_DownCntinitInHblanking(mtk_dp,
-				0x0010 + ucDCOffset);
-		}
+		sdp_down_cnt = (sdp_down_cnt > 0x08) ? sdp_down_cnt : 0x08;
+		break;
+	default:
+		sdp_down_cnt = (sdp_down_cnt > 0x08) ? sdp_down_cnt : 0x08;
 		break;
 	}
 
+	DPTXMSG("sdp_down_cnt_blank = %x\n", sdp_down_cnt);
+	mhal_DPTx_SetSDP_DownCntinitInHblanking(mtk_dp, sdp_down_cnt);
 }
 
 void mdrv_DPTx_SetTU(struct mtk_dp *mtk_dp)
@@ -604,8 +646,10 @@ void mdrv_DPTx_SetTU(struct mtk_dp *mtk_dp)
 	}
 
 	mhal_DPTx_SetTU_SetEncoder(mtk_dp);
+	mhal_DPTx_audio_sample_arrange(mtk_dp, TRUE);
 	mdrv_DPTx_SetSDP_DownCntinitInHblanking(mtk_dp);
 	mdrv_DPTx_SetSDP_DownCntinit(mtk_dp, Sram_Read_Start);
+	mdrv_DPTx_SetSDP_ASPCntinit(mtk_dp);
 }
 
 void mdrv_DPTx_CalculateMN(struct mtk_dp *mtk_dp)
@@ -688,7 +732,6 @@ void mdrv_DPTx_SetDPTXOut(struct mtk_dp *mtk_dp)
 
 	switch (mtk_dp->info.input_src) {
 	case DPTX_SRC_PG:
-		mhal_DPTx_VideoClock(true, mtk_dp->info.resolution);
 		mhal_DPTx_PGEnable(mtk_dp, true);
 		mhal_DPTx_Set_MVIDx2(mtk_dp, false);
 		DPTXMSG("Set Pattern Gen output\n");
@@ -1113,12 +1156,13 @@ u8 mdrv_get_checksum(struct edid *edid)
 	u8 *raw_edid = (u8 *)edid;
 	u8 checksum;
 
-	if (!edid)
+	if (!edid || edid->extensions > 255)
 		return 0;
 
 	ext_block = edid->extensions;
 	checksum = raw_edid[ext_block * EDID_LENGTH + 0x7f];
 	DPTXMSG("checksum: 0x%x\n", checksum);
+	DPTXMSG("ext_block: %d\n", ext_block);
 
 	return checksum;
 }
@@ -1482,6 +1526,19 @@ void mdrv_DPTx_PatternSet(bool enable, int resolution)
 	g_mtk_dp->info.resolution = resolution;
 }
 
+void mdrv_DPTx_ColorSet(int bpc, int format)
+{
+	if (g_mtk_dp == NULL) {
+		DPTXERR("%s: dp not initial\n", __func__);
+		return;
+	}
+	DPTXMSG("adb set bpc:%d format:%d\n", __func__, bpc, format);
+	// bpc 0/1/2/3/4: 6/8/10/12/16
+	// format 0/1/2/3/4 RGB/YUV422/YUV420/YONLY/RAW
+	g_mtk_dp->info.depth = bpc;
+	g_mtk_dp->info.format = format;
+}
+
 void mdrv_DPTx_set_maxlinkrate(bool enable, int maxlinkrate)
 {
 	if (g_mtk_dp == NULL) {
@@ -1584,6 +1641,7 @@ int mdrv_DPTx_HPD_HandleInThread(struct mtk_dp *mtk_dp)
 				DPTXMSG("Skip uevent(0)\n");
 
 			cancel_work_sync(&mtk_dp->hdcp_work);
+			cancel_delayed_work_sync(&mtk_dp->check_work);
 
 #ifdef DPTX_HDCP_ENABLE
 			if (mtk_dp->info.hdcp2_info.bEnable)
@@ -1592,6 +1650,7 @@ int mdrv_DPTx_HPD_HandleInThread(struct mtk_dp *mtk_dp)
 				mdrv_DPTx_HDCP1X_SetStartAuth(mtk_dp, false);
 
 			tee_removeDevice();
+			mtk_dp->hdcp_enable = false;
 #endif
 
 			mdrv_DPTx_InitVariable(mtk_dp);
@@ -1623,9 +1682,6 @@ int mdrv_DPTx_HPD_HandleInThread(struct mtk_dp *mtk_dp)
 				if (mtk_dp->priv->dpc_dev)
 					pm_runtime_put_sync(mtk_dp->priv->dpc_dev);
 			} else {
-				if (mtk_dp->info.bPatternGen)
-					mhal_DPTx_VideoClock(false,
-						mtk_dp->info.resolution);
 			}
 			fakecablein = false;
 			fakeres = FAKE_DEFAULT_RES;
@@ -1805,7 +1861,11 @@ int mdrv_DPTx_TrainingFlow(struct mtk_dp *mtk_dp, u8 ubLaneRate, u8 ubLaneCount)
 	}
 
 	ubTempValue[0] = ubTargetLinkRate;
-	ubTempValue[1] = ubTargetLaneCount | DPTX_AUX_SET_ENAHNCED_FRAME;
+	ubTempValue[1] = ubTargetLaneCount;
+	if (mtk_dp->training_info.ubDPCD_REV >= DPCD_R1_4 ||
+		mtk_dp->training_info.bEnhancedFrameCAP) {
+		ubTempValue[1] |= DPTX_AUX_SET_ENAHNCED_FRAME;
+	}
 	drm_dp_dpcd_write(&mtk_dp->aux, DPCD_00100, ubTempValue, 0x2);
 
 	if (mtk_dp->training_info.bSinkSSC_En) {
@@ -1997,9 +2057,6 @@ int mdrv_DPTx_TrainingFlow(struct mtk_dp *mtk_dp, u8 ubLaneRate, u8 ubLaneCount)
 
 		mhal_DPTx_SetScramble(mtk_dp, true);
 
-		ubTempValue[0] = ubTargetLaneCount
-			| DPTX_AUX_SET_ENAHNCED_FRAME;
-		drm_dp_dpcd_write(&mtk_dp->aux, DPCD_00101, ubTempValue, 0x1);
 		mhal_DPTx_SetEF_Mode(mtk_dp, ENABLE_DPTX_EF_MODE);
 
 		DPTXMSG("Link Training PASS\n");
@@ -2057,6 +2114,7 @@ bool mdrv_DPTx_CheckSinkCap(struct mtk_dp *mtk_dp)
 	mtk_dp->training_info.bTPS3 = (bTempBuffer[0x2]&BIT(6))>>0x6;
 	mtk_dp->training_info.bTPS4 = (bTempBuffer[0x3]&BIT(7))>>0x7;
 #endif
+	mtk_dp->training_info.bEnhancedFrameCAP = (bTempBuffer[0x2]&BIT(7))>>0x7;
 	mtk_dp->training_info.bDWN_STRM_PORT_PRESENT
 			= (bTempBuffer[0x5] & BIT(0));
 
@@ -2126,6 +2184,8 @@ unsigned int mdrv_DPTx_getAudioCaps(struct mtk_dp *mtk_dp)
 	struct cea_sad *sads;
 	int sad_count, i, j;
 	unsigned int caps = 0;
+	unsigned int mask;
+	unsigned int DpSampleRate = 0;
 
 	if (mtk_dp->edid == NULL) {
 		DPTXERR("EDID not found!\n");
@@ -2154,6 +2214,26 @@ unsigned int mdrv_DPTx_getAudioCaps(struct mtk_dp *mtk_dp)
 				DP_CAPABILITY_BITWIDTH_SFT);
 		}
 	}
+
+	/* DP only supports audio 2ch and 8ch */
+	/* and only supports audio 24bit */
+	mask = (DP_CHANNEL_2 | DP_CHANNEL_8)
+	       | (DP_CAPABILITY_SAMPLERATE_MASK << DP_CAPABILITY_SAMPLERATE_SFT)
+	       | ((DP_BITWIDTH_16|DP_BITWIDTH_24) << DP_CAPABILITY_BITWIDTH_SFT);
+	caps &= mask;
+
+	/* Remap the audio sample rate for audio module */
+	/* And DP only supports sample rate 44/48/192 */
+	DpSampleRate = (caps >> DP_CAPABILITY_SAMPLERATE_SFT) &
+				   DP_CAPABILITY_SAMPLERATE_MASK;
+	mask = ~(DP_CAPABILITY_SAMPLERATE_MASK << DP_CAPABILITY_SAMPLERATE_SFT);
+	caps &= mask;
+	if (DpSampleRate & DP_SAD_SAMPLERATE_44)
+		caps |= (DP_SAMPLERATE_44 << DP_CAPABILITY_SAMPLERATE_SFT);
+	if (DpSampleRate & DP_SAD_SAMPLERATE_48)
+		caps |= (DP_SAMPLERATE_48 << DP_CAPABILITY_SAMPLERATE_SFT);
+	if (DpSampleRate & DP_SAD_SAMPLERATE_192)
+		caps |= (DP_SAMPLERATE_192 << DP_CAPABILITY_SAMPLERATE_SFT);
 
 	DPTXMSG("audio caps:0x%x", caps);
 	return caps;
@@ -2234,9 +2314,8 @@ int mdrv_DPTx_SetTrainingStart(struct mtk_dp *mtk_dp)
 
 #if !ENABLE_DPTX_FIX_LRLC
 	maxLinkRate = ubLinkRate;
-	ubTrainTimeLimits = 0x6;
-#endif
 	ubTrainTimeLimits = 12;
+#endif
 	do {
 		DPTXMSG("LinkRate:0x%x, LaneCount:%x", ubLinkRate, ubLaneCount);
 
@@ -2339,7 +2418,7 @@ int mdrv_DPTx_Training_Handler(struct mtk_dp *mtk_dp)
 		mtk_dp->edid = mtk_dp_handle_edid(mtk_dp);
 		if (mtk_dp->edid) {
 			DPTXMSG("READ EDID done!\n");
-			if (mtk_dp_debug_get()) {
+			if (1) {
 				u8 *raw_edid = (u8 *)mtk_dp->edid;
 
 				DPTXMSG("Raw EDID:\n");
@@ -2381,7 +2460,7 @@ int mdrv_DPTx_Training_Handler(struct mtk_dp *mtk_dp)
 			mdrv_DPTx_AudioMute(mtk_dp, true);
 			mtk_dp->training_state = DPTX_NTSTATE_CHECKTIMING;
 			mtk_dp->dp_ready = true;
-			mhal_DPTx_EnableFEC(mtk_dp, false);
+			mhal_DPTx_EnableFEC(mtk_dp, mtk_dp->has_fec);
 		} else if (ret == DPTX_RETRANING) {
 			ret = DPTX_NOERR;
 		} else
@@ -2421,7 +2500,7 @@ void mdrv_DPTx_reAuthentication(struct mtk_dp *mtk_dp)
 	if (!mtk_dp->training_info.bCablePlugIn || !mtk_dp->dp_ready)
 		return;
 
-	queue_work(mtk_dp->dptx_wq, &mtk_dp->hdcp_work);
+	queue_work(mtk_dp->hdcp_wq, &mtk_dp->hdcp_work);
 }
 
 void mdrv_DPTx_CheckHDCPVersion(struct mtk_dp *mtk_dp, bool only_hdcp1x)
@@ -2438,44 +2517,69 @@ void mdrv_DPTx_CheckHDCPVersion(struct mtk_dp *mtk_dp, bool only_hdcp1x)
 	if (tee_addDevice(HDCP_NONE) != RET_SUCCESS)
 		mtk_dp->info.bAuthStatus = AUTH_FAIL;
 }
+EXPORT_SYMBOL(mdrv_DPTx_CheckHDCPVersion);
 
 static void mdrv_DPTx_hdcp_handle(struct work_struct *data)
 {
 	struct mtk_dp *mtk_dp = container_of(data, struct mtk_dp, hdcp_work);
+	mutex_lock(&mtk_dp->hdcp_mutex);
+	mtk_dp->hdcp_enable = true;
+
+	do {
+		if (!mtk_dp->training_info.bCablePlugIn || !mtk_dp->dp_ready)
+			goto end;
+
+		if (mtk_dp->info.bAuthStatus == AUTH_ZERO) {
+			mdrv_DPTx_CheckHDCPVersion(mtk_dp, false);
+			if (mtk_dp->info.hdcp2_info.bEnable)
+				mdrv_DPTx_HDCP2_SetStartAuth(mtk_dp, true);
+			else if (mtk_dp->info.hdcp1x_info.bEnable)
+				mdrv_DPTx_HDCP1X_SetStartAuth(mtk_dp, true);
+		}
+
+		if (mtk_dp->info.hdcp2_info.bEnable) {
+			HDCPTx_Hdcp2FSM(mtk_dp);
+
+			if (mtk_dp->info.bAuthStatus == AUTH_FAIL) {
+
+				mdrv_DPTx_CheckHDCPVersion(mtk_dp, true);
+				if (mtk_dp->info.hdcp1x_info.bEnable) {
+					mtk_dp->info.hdcp2_info.bEnable = false;
+					mdrv_DPTx_HDCP1X_SetStartAuth(mtk_dp, true);
+				}
+			}
+		}
+
+		if (mtk_dp->info.hdcp1x_info.bEnable)
+			mdrv_DPTx_HDCP1X_FSM(mtk_dp);
+	} while((mtk_dp->info.hdcp1x_info.bEnable
+				|| mtk_dp->info.hdcp2_info.bEnable)
+			&& (mtk_dp->info.bAuthStatus != AUTH_FAIL)
+			&& (mtk_dp->info.bAuthStatus != AUTH_PASS));
+
+end:
+	if (mtk_dp->info.bAuthStatus == AUTH_PASS)
+		schedule_delayed_work(&mtk_dp->check_work, 0);
+	else {
+		if (mtk_dp->info.hdcp2_info.bEnable)
+			mdrv_DPTx_HDCP2_SetStartAuth(mtk_dp, false);
+		else if (mtk_dp->info.hdcp1x_info.bEnable)
+			mdrv_DPTx_HDCP1X_SetStartAuth(mtk_dp, false);
+	}
+
+	mutex_unlock(&mtk_dp->hdcp_mutex);
+}
+
+static void mtk_dp_hdcp_check_work(struct work_struct *work)
+{
+	struct mtk_dp *mtk_dp = container_of(to_delayed_work(work),
+		struct mtk_dp, check_work);
 
 	if (!mtk_dp->training_info.bCablePlugIn || !mtk_dp->dp_ready)
 		return;
 
-	if (mtk_dp->info.bAuthStatus == AUTH_ZERO) {
-		mdrv_DPTx_CheckHDCPVersion(mtk_dp, false);
-		if (mtk_dp->info.hdcp2_info.bEnable)
-			mdrv_DPTx_HDCP2_SetStartAuth(mtk_dp, true);
-		else if (mtk_dp->info.hdcp1x_info.bEnable)
-			mdrv_DPTx_HDCP1X_SetStartAuth(mtk_dp, true);
-	}
-
-	if (mtk_dp->info.hdcp2_info.bEnable) {
-		HDCPTx_Hdcp2FSM(mtk_dp);
-
-		if (mtk_dp->info.bAuthStatus == AUTH_FAIL) {
-			tee_removeDevice();
-
-			mdrv_DPTx_CheckHDCPVersion(mtk_dp, true);
-			if (mtk_dp->info.hdcp1x_info.bEnable) {
-				mtk_dp->info.hdcp2_info.bEnable = false;
-				mdrv_DPTx_HDCP1X_SetStartAuth(mtk_dp, true);
-			}
-		}
-	}
-
-	if (mtk_dp->info.hdcp1x_info.bEnable)
-		mdrv_DPTx_HDCP1X_FSM(mtk_dp);
-
-	if ((mtk_dp->info.hdcp1x_info.bEnable
-			|| mtk_dp->info.hdcp2_info.bEnable)
-		&& (mtk_dp->info.bAuthStatus != AUTH_FAIL)
-		&& (mtk_dp->info.bAuthStatus != AUTH_PASS))
-		queue_work(mtk_dp->dptx_wq, &mtk_dp->hdcp_work);
+	if (mtk_dp->info.hdcp2_info.bEnable && (!dp_tx_hdcp2x_check_link(mtk_dp, &mtk_dp->info)))
+		schedule_delayed_work(&mtk_dp->check_work, DRM_HDCP2_CHECK_PERIOD_MS);
 }
 #else
 static void mdrv_DPTx_hdcp_handle(struct work_struct *data)
@@ -2493,6 +2597,54 @@ bool mdrv_DPTx_done(struct mtk_dp *mtk_dp)
 		return false;
 
 	return true;
+}
+
+void mtk_dp_hdr_sdp_config(struct mtk_dp *mtk_dp, struct hdmi_drm_infoframe *drm_hdr_infoframe)
+{
+	u8 SDP_DB[32] = {0};
+	u8 SDP_HB[4] = {0};
+	ssize_t len;
+	unsigned char buf[30]; /* 26 + 4 */
+
+	len = hdmi_drm_infoframe_pack_only(drm_hdr_infoframe, buf, sizeof(buf));
+
+	if (len < 0) {
+		DPTXMSG("DP HDR buffer size is smaller than hdr metadata infoframe\n");
+		return ;
+	}
+
+	/* Static metadata is a fixed 26 bytes + 4 byte header. */
+	if (len != 30){
+		DPTXMSG("DP HDR len ~= 30\n");
+		return ;
+	}
+	SDP_HB[0] = 0x00;
+	SDP_HB[1] = DP_SPEC_SDPTYP_DRM_INFO;
+	SDP_HB[2] = 0x1D;
+	SDP_HB[3] = (0x13 << 2);
+
+	SDP_DB[0] = 0x01;
+	SDP_DB[1] = 0x1A;
+
+	memcpy(&SDP_DB[2], &buf[4], 26);
+	mdrv_DPTx_SPKG_SDP(mtk_dp, true, DPTx_SDPTYP_DRM, SDP_HB, SDP_DB);
+	DPTXMSG("DP HDR hdr info sent\n");
+	//mtk_dp_spkg_sdp(mtk_dp, encoder_id, true, DP_SDP_PKG_DRM, SDP_HB, SDP_DB);
+}
+
+void mtk_dp_hdr(struct mtk_dp *mtk_dp)
+{
+	struct hdmi_drm_infoframe drm_hdr_infoframe;
+	int ret;
+
+	memset(&drm_hdr_infoframe, 0, sizeof(drm_hdr_infoframe));
+
+	ret = drm_hdmi_infoframe_set_hdr_metadata(&drm_hdr_infoframe, mtk_dp->conn.state);
+
+	if (ret)
+		DPTXMSG("DP HDR Fail : Couldn't set HDR metadata in infoframe\n");
+
+	mtk_dp_hdr_sdp_config(mtk_dp, &drm_hdr_infoframe);
 }
 
 int mdrv_DPTx_Handle(struct mtk_dp *mtk_dp)
@@ -2541,9 +2693,16 @@ int mdrv_DPTx_Handle(struct mtk_dp *mtk_dp)
 			mdrv_DPTx_I2S_Audio_Config(mtk_dp);
 			mdrv_DPTx_I2S_Audio_Enable(mtk_dp, true);
 		}
-		mtk_dp->state = DPTXSTATE_NORMAL;
-		break;
 
+		if (mtk_dp->video_enable || mtk_dp->audio_enable) {
+			mtk_dp->state = DPTXSTATE_NORMAL;
+			/* Using other way to trigger HDCP work */
+			//queue_work(mtk_dp->hdcp_wq, &mtk_dp->hdcp_work);
+		} else {
+			ret = DPTX_WAIT_TRIGGER;
+		}
+
+		break;
 	case DPTXSTATE_NORMAL:
 		if (mtk_dp->training_state != DPTX_NTSTATE_NORMAL) {
 			mdrv_DPTx_VideoMute(mtk_dp, true);
@@ -2557,6 +2716,10 @@ int mdrv_DPTx_Handle(struct mtk_dp *mtk_dp)
 	default:
 		break;
 	}
+
+	if ((mtk_dp->conn.state->hdr_output_metadata) &&
+		(mtk_dp->conn.hdr_sink_metadata.hdmi_type1.metadata_type &BIT(HDMI_STATIC_METADATA_TYPE1)))
+		mtk_dp_hdr(mtk_dp);
 
 	return ret;
 }
@@ -2711,7 +2874,9 @@ void mdrv_DPTx_I2S_Audio_Set_MDiv(struct mtk_dp *mtk_dp, u8 ucDiv)
 {
 	char bTable[7][5] = {"X2", "X4", "X8", "/2", "/4", "N/A", "/8"};
 
-	DPTXMSG("I2S Set Audio M Divider = %s\n", bTable[ucDiv-1]);
+	if (ucDiv > 0)
+		DPTXMSG("I2S Set Audio M Divider = %s\n", bTable[ucDiv-1]);
+
 	mhal_DPTx_Audio_M_Divider_Setting(mtk_dp, ucDiv);
 }
 
@@ -2786,10 +2951,8 @@ void mdrv_DPTx_I2S_Audio_Config(struct mtk_dp *mtk_dp)
 		break;
 	}
 
-	mdrv_DPTx_I2S_Audio_SDP_Channel_Setting(mtk_dp, ucChannel,
-		ucFs, ucWordlength);
-	mdrv_DPTx_I2S_Audio_Ch_Status_Set(mtk_dp, ucChannel,
-		ucFs, ucWordlength);
+	mdrv_DPTx_I2S_Audio_Set_MDiv(mtk_dp, 0);
+	mhal_DPTx_Set_Audio_N_Half(mtk_dp);
 
 	if (g_mtk_dp->priv->data->mmsys_id != MMSYS_MT6897
 		&& g_mtk_dp->priv->data->mmsys_id != MMSYS_MT6989
@@ -2799,7 +2962,11 @@ void mdrv_DPTx_I2S_Audio_Config(struct mtk_dp *mtk_dp)
 	else
 		mhal_DPTx_Audio_TDM_PG_EN(mtk_dp, ucChannel, ucFs, false);//DPTX audio for TDM
 
-	mdrv_DPTx_I2S_Audio_Set_MDiv(mtk_dp, 4);
+	mdrv_DPTx_I2S_Audio_Ch_Status_Set(mtk_dp, ucChannel,
+		ucFs, ucWordlength);
+
+	mdrv_DPTx_I2S_Audio_SDP_Channel_Setting(mtk_dp, ucChannel,
+		ucFs, ucWordlength);
 }
 
 void mdrv_DPTx_I2S_Audio_SDP_Channel_Setting(struct mtk_dp *mtk_dp,
@@ -2977,15 +3144,10 @@ void mtk_dp_video_config(struct mtk_dp *mtk_dp)
 	struct DPTX_TIMING_PARAMETER *DPTX_TBL = &mtk_dp->info.DPTX_OUTBL;
 	u32 mvid = 0;
 	bool overwrite = false;
+	struct videomode vm = {0};
 
 	if (!mtk_dp->dp_ready) {
 		DPTXERR("%s, DP is not ready!\n", __func__);
-		return;
-	}
-
-	if (mtk_dp->info.resolution >= SINK_MAX) {
-		DPTXERR("DPTX doesn't support this resolution(%d)!\n",
-			mtk_dp->info.resolution);
 		return;
 	}
 
@@ -3011,121 +3173,29 @@ void mtk_dp_video_config(struct mtk_dp *mtk_dp)
 		mtk_dp->info.depth = fakebpc;
 	}
 
-	switch (mtk_dp->info.resolution) {
-	case SINK_7680_4320:
-		DPTX_TBL->FrameRate = 60;
-		DPTX_TBL->Htt = 8040; DPTX_TBL->Hbp = 240; DPTX_TBL->Hsw = 96;
-		DPTX_TBL->bHsp = 0; DPTX_TBL->Hfp = 24; DPTX_TBL->Hde = 7680;
-		DPTX_TBL->Vtt = 4381; DPTX_TBL->Vbp = 6; DPTX_TBL->Vsw = 8;
-		DPTX_TBL->bVsp = 0; DPTX_TBL->Vfp = 47; DPTX_TBL->Vde = 4320;
-		break;
-	case SINK_3840_2160:
-		DPTX_TBL->FrameRate = 60;
-		DPTX_TBL->Htt = 4400; DPTX_TBL->Hbp = 296; DPTX_TBL->Hsw = 88;
-		DPTX_TBL->bHsp = 0; DPTX_TBL->Hfp = 176; DPTX_TBL->Hde = 3840;
-		DPTX_TBL->Vtt = 2250; DPTX_TBL->Vbp = 72; DPTX_TBL->Vsw = 10;
-		DPTX_TBL->bVsp = 0; DPTX_TBL->Vfp = 8; DPTX_TBL->Vde = 2160;
-		break;
-	case SINK_3840_2160_30:
-		DPTX_TBL->FrameRate = 30;
-		DPTX_TBL->Htt = 4400; DPTX_TBL->Hbp = 296; DPTX_TBL->Hsw = 88;
-		DPTX_TBL->bHsp = 0; DPTX_TBL->Hfp = 176; DPTX_TBL->Hde = 3840;
-		DPTX_TBL->Vtt = 2250; DPTX_TBL->Vbp = 72; DPTX_TBL->Vsw = 10;
-		DPTX_TBL->bVsp = 0; DPTX_TBL->Vfp = 8; DPTX_TBL->Vde = 2160;
-		break;
-	case SINK_2560_1600:
-		DPTX_TBL->FrameRate = 60;
-		DPTX_TBL->Htt = 2720; DPTX_TBL->Hbp = 80; DPTX_TBL->Hsw = 32;
-		DPTX_TBL->bHsp = 0; DPTX_TBL->Hfp = 48; DPTX_TBL->Hde = 2560;
-		DPTX_TBL->Vtt = 1646; DPTX_TBL->Vbp = 37; DPTX_TBL->Vsw = 6;
-		DPTX_TBL->bVsp = 0; DPTX_TBL->Vfp = 3; DPTX_TBL->Vde = 1600;
-		break;
-	case SINK_2560_1440:
-		DPTX_TBL->FrameRate = 60;
-		DPTX_TBL->Htt = 2720; DPTX_TBL->Hbp = 80; DPTX_TBL->Hsw = 32;
-		DPTX_TBL->bHsp = 0; DPTX_TBL->Hfp = 48; DPTX_TBL->Hde = 2560;
-		DPTX_TBL->Vtt = 1481; DPTX_TBL->Vbp = 33; DPTX_TBL->Vsw = 5;
-		DPTX_TBL->bVsp = 0; DPTX_TBL->Vfp = 3; DPTX_TBL->Vde = 1440;
-		break;
-	case SINK_1920_1440:
-		DPTX_TBL->FrameRate = 60;
-		DPTX_TBL->Htt = 2600; DPTX_TBL->Hbp = 344; DPTX_TBL->Hsw = 208;
-		DPTX_TBL->bHsp = 1; DPTX_TBL->Hfp = 128; DPTX_TBL->Hde = 1920;
-		DPTX_TBL->Vtt = 1500; DPTX_TBL->Vbp = 56; DPTX_TBL->Vsw = 3;
-		DPTX_TBL->bVsp = 0; DPTX_TBL->Vfp = 1; DPTX_TBL->Vde = 1440;
-		break;
-	case SINK_1920_1200:
-		DPTX_TBL->FrameRate = 60;
-		DPTX_TBL->Htt = 2080; DPTX_TBL->Hbp = 80; DPTX_TBL->Hsw = 32;
-		DPTX_TBL->bHsp = 0; DPTX_TBL->Hfp = 48; DPTX_TBL->Hde = 1920;
-		DPTX_TBL->Vtt = 1235; DPTX_TBL->Vbp = 26; DPTX_TBL->Vsw = 6;
-		DPTX_TBL->bVsp = 0; DPTX_TBL->Vfp = 3; DPTX_TBL->Vde = 1200;
-		break;
-	case SINK_1920_1080_120_RB:
-		DPTX_TBL->FrameRate = 120;
-		DPTX_TBL->Htt = 2080; DPTX_TBL->Hbp = 80; DPTX_TBL->Hsw = 32;
-		DPTX_TBL->bHsp = 0; DPTX_TBL->Hfp = 48; DPTX_TBL->Hde = 1920;
-		DPTX_TBL->Vtt = 1144; DPTX_TBL->Vbp = 56; DPTX_TBL->Vsw = 5;
-		DPTX_TBL->bVsp = 0; DPTX_TBL->Vfp = 3; DPTX_TBL->Vde = 1080;
-		break;
-	case SINK_1920_1080_120:
-		DPTX_TBL->FrameRate = 120;
-		DPTX_TBL->Htt = 2200; DPTX_TBL->Hbp = 148; DPTX_TBL->Hsw = 44;
-		DPTX_TBL->bHsp = 0; DPTX_TBL->Hfp = 88; DPTX_TBL->Hde = 1920;
-		DPTX_TBL->Vtt = 1125; DPTX_TBL->Vbp = 36; DPTX_TBL->Vsw = 5;
-		DPTX_TBL->bVsp = 0; DPTX_TBL->Vfp = 4; DPTX_TBL->Vde = 1080;
-		break;
-	case SINK_1920_1080:
-		DPTX_TBL->FrameRate = 60;
-		DPTX_TBL->Htt = 2200; DPTX_TBL->Hbp = 148; DPTX_TBL->Hsw = 44;
-		DPTX_TBL->bHsp = 0; DPTX_TBL->Hfp = 88; DPTX_TBL->Hde = 1920;
-		DPTX_TBL->Vtt = 1125; DPTX_TBL->Vbp = 36; DPTX_TBL->Vsw = 5;
-		DPTX_TBL->bVsp = 0; DPTX_TBL->Vfp = 4; DPTX_TBL->Vde = 1080;
-		break;
-	case SINK_1080_2460:
-		DPTX_TBL->FrameRate = 60;
-		DPTX_TBL->Htt = 1172; DPTX_TBL->Hbp = 30; DPTX_TBL->Hsw = 32;
-		DPTX_TBL->bHsp = 1; DPTX_TBL->Hfp = 30; DPTX_TBL->Hde = 1080;
-		DPTX_TBL->Vtt = 2476; DPTX_TBL->Vbp = 5; DPTX_TBL->Vsw = 2;
-		DPTX_TBL->bVsp = 0; DPTX_TBL->Vfp = 9; DPTX_TBL->Vde = 2460;
-		break;
-	case SINK_1280_1024:
-		DPTX_TBL->FrameRate = 60;
-		DPTX_TBL->Htt = 1560; DPTX_TBL->Hbp = 148; DPTX_TBL->Hsw = 44;
-		DPTX_TBL->bHsp = 0; DPTX_TBL->Hfp = 88; DPTX_TBL->Hde = 1280;
-		DPTX_TBL->Vtt = 1069; DPTX_TBL->Vbp = 36; DPTX_TBL->Vsw = 5;
-		DPTX_TBL->bVsp = 0; DPTX_TBL->Vfp = 4; DPTX_TBL->Vde = 1024;
-		break;
-	case SINK_1280_960:
-		DPTX_TBL->FrameRate = 60;
-		DPTX_TBL->Htt = 1800; DPTX_TBL->Hbp = 312; DPTX_TBL->Hsw = 112;
-		DPTX_TBL->bHsp = 0; DPTX_TBL->Hfp = 96; DPTX_TBL->Hde = 1280;
-		DPTX_TBL->Vtt = 1000; DPTX_TBL->Vbp = 36; DPTX_TBL->Vsw = 3;
-		DPTX_TBL->bVsp = 0; DPTX_TBL->Vfp = 1; DPTX_TBL->Vde = 960;
-		break;
-	case SINK_1280_720:
-		DPTX_TBL->FrameRate = 60;
-		DPTX_TBL->Htt = 1650; DPTX_TBL->Hbp = 220; DPTX_TBL->Hsw = 40;
-		DPTX_TBL->bHsp = 0; DPTX_TBL->Hfp = 110; DPTX_TBL->Hde = 1280;
-		DPTX_TBL->Vtt = 750; DPTX_TBL->Vbp = 20; DPTX_TBL->Vsw = 5;
-		DPTX_TBL->bVsp = 0; DPTX_TBL->Vfp = 5; DPTX_TBL->Vde = 720;
-		break;
-	case SINK_800_600:
-		DPTX_TBL->FrameRate = 60;
-		DPTX_TBL->Htt = 1056; DPTX_TBL->Hbp = 88; DPTX_TBL->Hsw = 128;
-		DPTX_TBL->bHsp = 0; DPTX_TBL->Hfp = 40; DPTX_TBL->Hde = 800;
-		DPTX_TBL->Vtt = 628; DPTX_TBL->Vbp = 23; DPTX_TBL->Vsw = 4;
-		DPTX_TBL->bVsp = 0; DPTX_TBL->Vfp = 16; DPTX_TBL->Vde = 600;
-		break;
-	case SINK_640_480:
-	default:
-		DPTX_TBL->FrameRate = 60;
-		DPTX_TBL->Htt = 800; DPTX_TBL->Hbp = 48; DPTX_TBL->Hsw = 96;
-		DPTX_TBL->bHsp = 1; DPTX_TBL->Hfp = 16; DPTX_TBL->Hde = 640;
-		DPTX_TBL->Vtt = 525; DPTX_TBL->Vbp = 33; DPTX_TBL->Vsw = 2;
-		DPTX_TBL->bVsp = 1; DPTX_TBL->Vfp = 10; DPTX_TBL->Vde = 480;
-		break;
-	}
+	vm.hactive = mtk_dp->mode.hdisplay;
+	vm.hfront_porch = mtk_dp->mode.hsync_start - mtk_dp->mode.hdisplay;
+	vm.hsync_len = mtk_dp->mode.hsync_end - mtk_dp->mode.hsync_start;
+	vm.hback_porch = mtk_dp->mode.htotal - mtk_dp->mode.hsync_end;
+	vm.vactive = mtk_dp->mode.vdisplay;
+	vm.vfront_porch = mtk_dp->mode.vsync_start - mtk_dp->mode.vdisplay;
+	vm.vsync_len = mtk_dp->mode.vsync_end - mtk_dp->mode.vsync_start;
+	vm.vback_porch = mtk_dp->mode.vtotal - mtk_dp->mode.vsync_end;
+	vm.pixelclock = mtk_dp->mode.clock * 1000;
+
+	DPTX_TBL->FrameRate = drm_mode_vrefresh(&mtk_dp->mode);
+	DPTX_TBL->Htt = mtk_dp->mode.htotal;
+	DPTX_TBL->Hbp = vm.hback_porch;
+	DPTX_TBL->Hsw = vm.hsync_len;
+	DPTX_TBL->bHsp = !(mtk_dp->mode.flags & DRM_MODE_FLAG_PHSYNC);
+	DPTX_TBL->Hfp = vm.hfront_porch;
+	DPTX_TBL->Hde = vm.hactive;
+	DPTX_TBL->Vtt = mtk_dp->mode.vtotal;
+	DPTX_TBL->Vbp = vm.vback_porch;
+	DPTX_TBL->Vsw = vm.vsync_len;
+	DPTX_TBL->bVsp = !(mtk_dp->mode.flags & DRM_MODE_FLAG_PVSYNC);
+	DPTX_TBL->Vfp = vm.vfront_porch;
+	DPTX_TBL->Vde = vm.vactive;
 
 	if (mtk_dp->info.resolution == SINK_3840_2160) {
 		// patch for 4k@60 with DSC 3 times compress
@@ -3152,6 +3222,8 @@ void mtk_dp_video_config(struct mtk_dp *mtk_dp)
 	//interlace not support
 	DPTX_TBL->Video_ip_mode = DPTX_VIDEO_PROGRESSIVE;
 	mhal_DPTx_SetMSA(mtk_dp);
+
+	mtk_dp->info.depth = g_mtk_dp->info.depth;
 
 	mdrv_DPTx_Set_MISC(mtk_dp);
 	if (mtk_dp->info.bPatternGen)
@@ -3293,7 +3365,7 @@ static int mtk_dp_control_kthread(void *data)
 			mtk_dp->video_enable = true;
 			mtk_dp->info.resolution = res;
 			queue_work(mtk_dp->dptx_wq, &mtk_dp->dptx_work);
-			queue_work(mtk_dp->dptx_wq, &mtk_dp->hdcp_work);
+			// queue_work(mtk_dp->dptx_wq, &mtk_dp->hdcp_work);
 
 		} else if (videomute & video_mute) {
 			mtk_dp->video_enable = false;
@@ -3305,6 +3377,20 @@ static int mtk_dp_control_kthread(void *data)
 	}
 
 	return 0;
+}
+
+void mtk_drm_dp_trigger_hdcp(void)
+{
+	if (g_mtk_dp == NULL) {
+		DPTXERR("%s: dp not initial\n", __func__);
+		return;
+	}
+	if (!g_mtk_dp->video_enable && !g_mtk_dp->audio_enable)
+		return;
+	if (g_mtk_dp->hdcp_enable)
+		return;
+	g_mtk_dp->hdcp_enable = true;
+	queue_work(g_mtk_dp->dptx_wq, &g_mtk_dp->hdcp_work);
 }
 
 int mtk_drm_dp_get_dev_info(struct drm_device *dev, void *data,
@@ -3352,6 +3438,12 @@ int mtk_drm_dp_audio_enable(struct drm_device *dev, void *data,
 
 	mdrv_DPTx_I2S_Audio_Enable(mtk_dp, mtk_dp->audio_enable);
 
+	if((mtk_dp->conn.state->hdr_output_metadata) &&
+		(mtk_dp->conn.hdr_sink_metadata.hdmi_type1.metadata_type &BIT(HDMI_STATIC_METADATA_TYPE1)) &&
+		(mtk_dp->audio_enable == 1) &&
+		(mtk_dp->video_enable == 1))
+		mtk_dp_hdr(mtk_dp);
+
 	return 0;
 }
 
@@ -3378,6 +3470,80 @@ int mtk_drm_dp_audio_config(struct drm_device *dev, void *data,
 	return 0;
 }
 
+static inline struct mtk_dp *mtk_dp_ctx_from_conn(struct drm_connector *c)
+{
+	return container_of(c, struct mtk_dp, conn);
+}
+
+static void mtk_dp_connector_init_property(struct drm_connector *conn)
+{
+	struct mtk_dp *mtk_dp = mtk_dp_ctx_from_conn(conn);
+	struct drm_device *dev = mtk_dp->conn.dev;
+	struct drm_property *prop;
+	struct mtk_drm_connector_caps connector_caps;
+	struct drm_property_blob *blob;
+	uint32_t blob_id = 0;
+
+	spin_lock_init(&mtk_dp->property_lock);
+
+	/* create mtk_dp_blob property, include DP caps info (e.g. color mode) */
+	prop = drm_property_create(conn->dev, DRM_MODE_PROP_BLOB |
+			DRM_MODE_PROP_IMMUTABLE,
+			"CAPS_BLOB_ID", 0);
+	if (!prop) {
+		DPTXERR("cannot create CAPS_BLOB_ID blob property\n");
+		return;
+	}
+
+	memset(&connector_caps, 0, sizeof(connector_caps));
+
+	blob = drm_property_create_blob(dev,
+		sizeof(struct mtk_drm_connector_caps), &connector_caps);
+	if (!IS_ERR_OR_NULL(blob))
+		blob_id = blob->base.id;
+	else
+		DPTXERR("create_blob error\n");
+
+	mtk_dp->dp_cap_blob = prop;
+	mtk_dp->connector_caps_blob_id = blob_id;
+	drm_object_attach_property(&conn->base, prop, 0);
+}
+
+static void mtk_dp_update_cap_property(struct mtk_dp *mtk_dp)
+{
+	struct drm_device *dev = mtk_dp->conn.dev;
+	struct mtk_drm_connector_caps connector_caps;
+	struct drm_property_blob *new_blob = NULL;
+	struct drm_property_blob *old_blob = NULL;
+	uint32_t new_blob_id = 0;
+	uint32_t old_blob_id = 0;
+
+	memset(&connector_caps, 0, sizeof(connector_caps));
+
+	connector_caps.conn_caps.lcm_degree = 0;
+	if (mtk_dp->conn.hdr_sink_metadata.hdmi_type1.metadata_type & BIT(HDMI_STATIC_METADATA_TYPE1))
+		connector_caps.conn_caps.lcm_color_mode = MTK_DRM_COLOR_MODE_BT2100_PQ;
+	else
+		connector_caps.conn_caps.lcm_color_mode = MTK_DRM_COLOR_MODE_NATIVE;
+
+	new_blob = drm_property_create_blob(dev,
+		sizeof(struct mtk_drm_connector_caps), &connector_caps);
+	if (!IS_ERR_OR_NULL(new_blob)) {
+		new_blob_id = new_blob->base.id;
+	} else {
+		DPTXERR("create_blob error\n");
+		return;
+	}
+
+	drm_object_property_set_value(&mtk_dp->conn.base, mtk_dp->dp_cap_blob, new_blob_id);
+
+	old_blob_id = mtk_dp->connector_caps_blob_id;
+	old_blob = drm_property_lookup_blob(dev, old_blob_id);
+	drm_property_blob_put(old_blob);
+	mtk_dp->connector_caps_blob_id = new_blob_id;
+	DPTXMSG("Set DP color_mode = %d\n", connector_caps.conn_caps.lcm_color_mode);
+}
+
 int mtk_drm_dp_get_cap(struct drm_device *dev, void *data,
 		struct drm_file *file_priv)
 {
@@ -3399,6 +3565,8 @@ int mtk_drm_dp_get_cap(struct drm_device *dev, void *data,
 			| (BIT(force_len) << DP_CAPABILITY_BITWIDTH_SFT));
 		return 0;
 	}
+
+	mtk_dp_update_cap_property(g_mtk_dp);
 
 	if (g_mtk_dp->dp_ready)
 		*dp_cap = g_mtk_dp->info.audio_caps;
@@ -3649,7 +3817,7 @@ static int mtk_dp_dt_parse_pdata(struct mtk_dp *mtk_dp,
 	mtk_dp->phyd_regs = of_iomap(dev->of_node, 1);
 	pm_runtime_enable(dev);
 
-	ret = of_property_read_u32_array(dev->of_node, "dptx,phy_params",
+	ret = of_property_read_u32_array(dev->of_node, "dptx,phy-params",
 		phy_params_dts, ARRAY_SIZE(phy_params_dts));
 	if (ret) {
 		DPTXMSG("get phy_params fail, use default val, ret %d\n", ret);
@@ -3664,11 +3832,6 @@ static int mtk_dp_dt_parse_pdata(struct mtk_dp *mtk_dp,
 		dev_info(dev, "failed to parse vsv property\n");
 
 	return 0;
-}
-
-static inline struct mtk_dp *mtk_dp_ctx_from_conn(struct drm_connector *c)
-{
-	return container_of(c, struct mtk_dp, conn);
 }
 
 static enum drm_connector_status mtk_dp_conn_detect(struct drm_connector *conn,
@@ -3737,12 +3900,15 @@ static int mtk_dp_conn_get_modes(struct drm_connector *conn)
 		return 1;
 	}
 
+	mtk_dp->conn.hdr_sink_metadata.hdmi_type1.metadata_type = 0;
+
 	if (mtk_dp->edid) {
 		drm_connector_update_edid_property(&mtk_dp->conn,
 			mtk_dp->edid);
 		ret = drm_add_edid_modes(&mtk_dp->conn, mtk_dp->edid);
 		//drm_edid_to_eld(&mtk_dp->conn, mtk_dp->edid);
 		DPTXMSG("%s modes = %d\n", __func__, ret);
+		mtk_dp_update_cap_property(g_mtk_dp);
 
 		if (ret)
 			return ret;
@@ -3766,6 +3932,7 @@ static struct drm_display_limit_mode dp_plat_limit[] = {
 	{3840, 2160, 60, 594000, 1},
 	{3840, 2160, 30, 297000, 1},
 	{2560, 1600, 60, 268500, 1},
+	{2560, 1440, 120, 482650, 1},
 	{2560, 1440, 60, 241500, 1},
 	{1080, 2460, 60, 174110, 1},
 	{1920, 1200, 60, 152128, 1},
@@ -3811,22 +3978,54 @@ void mtk_dp_enable_4k60(int enable)
 	DPTXFUNC("enable = %d\n", dp_plat_limit[0].valid);
 }
 
+bool check_vblank_time(struct drm_display_mode *mode)
+{
+	u16 u16vblk = 0;
+	u32 u16FPS = 0;
+	u64 u16vtotal = 0;
+	u64 u64modeVblkUs = 0;
+	u64 u64uslimit = 0;
+	bool ret = false;
+
+	if (mode == NULL)
+		return false;
+
+	if (mode->vdisplay >= mode->vtotal)
+		return false;
+
+	u16FPS = drm_mode_vrefresh(mode);
+	u16vtotal = mode->vtotal;
+
+	if (u16FPS == 0 || u16vtotal == 0)
+		return false;
+
+	u64uslimit = VBK_LIMITE_US;
+	u16vblk = OFFSET(mode->vtotal, mode->vdisplay);
+	u64modeVblkUs = US_PER_SEC*(u64)u16vblk/(u64)u16FPS/(u64)u16vtotal;
+
+	if (u64modeVblkUs >= u64uslimit)
+		ret = true;
+	else
+		ret = false;
+
+	DPTXMSG("%s u16vblk:%u, vtotal=%u, vdisplay=%u, vbns=%llu ,limit us: %llu ret:%d\n",
+		__func__, u16vblk, mode->vtotal, mode->vdisplay, u64modeVblkUs,
+		u64uslimit, ret);
+
+	return ret;
+}
+
 static enum drm_mode_status mtk_dp_conn_mode_valid(struct drm_connector *conn,
 		struct drm_display_mode *mode)
 {
 	int plat_limit_array = ARRAY_SIZE(dp_plat_limit);
-	int i;
 	struct mtk_dp *mtk_dp = mtk_dp_ctx_from_conn(conn);
-	unsigned int bandwidth = mtk_dp->training_info.ubLinkLaneCount *
+	int bandwidth = mtk_dp->training_info.ubLinkLaneCount *
 		mtk_dp->training_info.ubLinkRate * 27000 * 8 / 24;
 
-#if DPTX_SUPPORT_DSC
-	// TODO : add DSC rules here
 	if (mode->hdisplay == 3840 && mode->vdisplay == 2160 &&
-		drm_mode_vrefresh(mode) == 60 && mtk_dp->has_dsc &&
-		mtk_dp->training_info.ubLinkLaneCount <= DP_LANECOUNT_2)
+		drm_mode_vrefresh(mode) == 60 && mtk_dp->has_dsc)
 		bandwidth = bandwidth * 594 * 10 / 2025;
-#endif
 
 	if (fakecablein == true)
 		bandwidth = dp_plat_limit[0].clock;
@@ -3835,39 +4034,23 @@ static enum drm_mode_status mtk_dp_conn_mode_valid(struct drm_connector *conn,
 		mode->hdisplay, mode->vdisplay, drm_mode_vrefresh(mode), mode->clock,
 		bandwidth, dp_plat_limit[0].valid);
 
-
 	if (mode->clock > (dp_plat_limit[0].clock + 50000))
 		return MODE_CLOCK_HIGH;
 	if (mode->clock < (dp_plat_limit[plat_limit_array-1].clock - 5000))
 		return MODE_CLOCK_LOW;
 
-	for (i = 0; i < plat_limit_array; i++) {
-		if (mode->hdisplay == 640 && mode->vdisplay == 480)
-			break;
+	if (mode->clock == 0)
+		mode->clock
+		= mode->htotal * mode->vtotal * drm_mode_vrefresh(mode);
 
-		if (mode->clock == 0)
-			mode->clock
-			= mode->htotal * mode->vtotal * drm_mode_vrefresh(mode);
-
-		if ((abs(dp_plat_limit[i].vrefresh - drm_mode_vrefresh(mode)) <= 1)
-			&& (mode->vdisplay == dp_plat_limit[i].vdisplay)
-			&& (mode->hdisplay == dp_plat_limit[i].hdisplay)
-			&& (dp_plat_limit[i].clock < bandwidth)) {
-
-			if (dp_plat_limit[i].valid)
-				break;
-
-			return MODE_BAD_VSCAN;
-		}
-	}
-
-	if (i >= plat_limit_array)
-		return MODE_BAD_VSCAN;
+	if (check_vblank_time(mode) == false)
+		return MODE_BAD;
 
 	DPTXMSG("%s xres=%d, yres=%d, refresh=%d, clock=%d\n",
 			__func__, mode->hdisplay, mode->vdisplay,
 			drm_mode_vrefresh(mode),
 			mode->clock);
+
 	if (0x1fff > 0 && mode->hdisplay > 0x1fff)
 		return MODE_VIRTUAL_X;
 	if (0x1fff > 0 && mode->vdisplay > 0x1fff)
@@ -3876,9 +4059,40 @@ static enum drm_mode_status mtk_dp_conn_mode_valid(struct drm_connector *conn,
 	return MODE_OK;
 }
 
+static int mtk_dp_connector_atomic_check(struct drm_connector *connector,
+					 struct drm_atomic_state *state)
+{
+	struct mtk_dp *mtk_dp;
+	struct hdr_output_metadata default_hdr_output;
+	struct drm_device *dev = connector->dev;
+	struct drm_property_blob *prop = NULL;
+	struct drm_connector_state *tmp_state = NULL;
+
+	mtk_dp = container_of(connector, struct mtk_dp, conn);
+	tmp_state = drm_atomic_get_connector_state(state, connector);
+	mtk_dp->conn.state->hdr_output_metadata = tmp_state->hdr_output_metadata;
+
+	if (!mtk_dp->training_info.bCablePlugIn) {
+		if (mtk_dp->conn.state->hdr_output_metadata)
+			memset(mtk_dp->conn.state->hdr_output_metadata, 0,
+				sizeof(*mtk_dp->conn.state->hdr_output_metadata));
+	} else {
+		if ((mtk_dp->conn.state->hdr_output_metadata) &&
+		(mtk_dp->conn.hdr_sink_metadata.hdmi_type1.metadata_type & BIT(HDMI_STATIC_METADATA_TYPE1))) {
+			mtk_dp_hdr(mtk_dp);
+			g_mtk_dp->info.depth = DP_COLOR_DEPTH_10BIT;
+		} else {
+			g_mtk_dp->info.depth = DP_COLOR_DEPTH_8BIT;
+		}
+	}
+
+	return 0;
+}
+
 static const struct drm_connector_helper_funcs mtk_dp_connector_helper_funcs = {
 	.get_modes = mtk_dp_conn_get_modes,
 	.mode_valid = mtk_dp_conn_mode_valid,
+	.atomic_check = mtk_dp_connector_atomic_check,
 };
 
 static void mtk_dp_encoder_destroy(struct drm_encoder *encoder)
@@ -3889,6 +4103,31 @@ static void mtk_dp_encoder_destroy(struct drm_encoder *encoder)
 
 static const struct drm_encoder_funcs mtk_dp_enc_funcs = {
 	.destroy = mtk_dp_encoder_destroy,
+};
+
+static bool mtk_dp_encoder_mode_fixup(struct drm_encoder *encoder,
+				       const struct drm_display_mode *mode,
+				       struct drm_display_mode *adjusted_mode)
+{
+	return true;
+}
+
+static void mtk_dp_encoder_mode_set(struct drm_encoder *encoder,
+				     struct drm_display_mode *mode,
+				     struct drm_display_mode *adjusted)
+{
+	struct mtk_dp *mtk_dp = container_of(encoder, struct mtk_dp, enc);
+
+	drm_mode_copy(&mtk_dp->mode, adjusted);
+
+	mhal_DPTx_ModeCopy(adjusted);
+	DPTXMSG("%s Htt=%d Vtt=%d Ha=%d Va=%d\n", __func__, mtk_dp->mode.htotal,
+		mtk_dp->mode.vtotal, mtk_dp->mode.hdisplay, mtk_dp->mode.vdisplay);
+}
+
+static const struct drm_encoder_helper_funcs mtk_dp_encoder_helper_funcs = {
+	.mode_fixup = mtk_dp_encoder_mode_fixup,
+	.mode_set = mtk_dp_encoder_mode_set,
 };
 
 static ssize_t mtk_dp_aux_transfer(struct drm_dp_aux *mtk_aux,
@@ -4281,6 +4520,53 @@ void mtk_dp_SWInterruptSet(int bstatus)
 }
 EXPORT_SYMBOL_GPL(mtk_dp_SWInterruptSet);
 
+unsigned int mtk_dp_get_colordepth(void)
+{
+	return g_mtk_dp->info.depth;
+}
+
+void mtk_dp_poweroff_sub(void)
+{
+	if (g_mtk_dp == NULL) {
+		DPTXERR("%s: dp not initial\n", __func__);
+		return;
+	}
+
+	DPTXFUNC();
+
+	mutex_lock(&dp_lock);
+	if (g_mtk_dp->disp_status == DPTX_DISP_NONE) {
+		DPTXMSG("DPTX has been powered off\n");
+		mutex_unlock(&dp_lock);
+		return;
+	}
+
+	g_mtk_dp->disp_status = DPTX_DISP_SUSPEND;
+	//mtk_dp_HPDInterruptSet(HPD_DISCONNECT);
+	mutex_unlock(&dp_lock);
+}
+
+void mtk_dp_poweron_sub(void)
+{
+	if (g_mtk_dp == NULL) {
+		DPTXERR("%s: dp not initial\n", __func__);
+		return;
+	}
+
+	DPTXFUNC();
+
+	mutex_lock(&dp_lock);
+	g_mtk_dp->disp_status = DPTX_DISP_RESUME;
+	if (g_mtk_dp->bPowerOn) {
+		DPTXMSG("DPTX has been powered on\n");
+		mutex_unlock(&dp_lock);
+		return;
+	}
+
+	//mtk_dp_HPDInterruptSet(HPD_CONNECT);
+	mutex_unlock(&dp_lock);
+}
+
 void mtk_dp_poweroff(void)
 {
 	if (g_mtk_dp == NULL) {
@@ -4341,9 +4627,17 @@ static int mtk_dp_create_workqueue(struct mtk_dp *mtk_dp)
 		return -ENOMEM;
 	}
 
+	mtk_dp->hdcp_wq = create_singlethread_workqueue("mtk_hdcp_wq");
+	if (!mtk_dp->hdcp_wq) {
+		DPTXERR("Failed to create hdcp workqueue\n");
+		return -ENOMEM;
+	}
+
 	INIT_WORK(&mtk_dp->dptx_work, mdrv_DPTx_main_handle);
 	INIT_WORK(&mtk_dp->hdcp_work, mdrv_DPTx_hdcp_handle);
-
+#ifdef DPTX_HDCP_ENABLE
+	INIT_DELAYED_WORK(&mtk_dp->check_work, mtk_dp_hdcp_check_work);
+#endif
 	return 0;
 }
 
@@ -4369,9 +4663,13 @@ static int mtk_dp_bind(struct device *dev, struct device *master, void *data)
 	if (drm_encoder_init(drm, &mtk_dp->enc,	&mtk_dp_enc_funcs,
 		DRM_MODE_ENCODER_DPMST, "DP MST"))
 		goto err_encoder_init;
+	drm_encoder_helper_add(&mtk_dp->enc, &mtk_dp_encoder_helper_funcs);
 	mtk_dp->enc.possible_crtcs = 2;
 	drm_connector_attach_encoder(&mtk_dp->conn, &mtk_dp->enc);
+	drm_connector_register(&mtk_dp->conn);
 	g_mtk_dp = mtk_dp;
+
+	drm_connector_attach_hdr_output_metadata_property(&mtk_dp->conn);
 
 	//mtk_dp->conn.kdev = drm->dev;
 	mtk_dp->aux.dev = mtk_dp->conn.kdev;
@@ -4379,10 +4677,14 @@ static int mtk_dp_bind(struct device *dev, struct device *master, void *data)
 	if (drm_dp_aux_register(&mtk_dp->aux))
 		goto err_encoder_init;
 
+	drm_connector_attach_hdr_output_metadata_property(&mtk_dp->conn);
+	mtk_dp_connector_init_property(&mtk_dp->conn);
+
 	DPTXFUNC("Successful\n");
 	return 0;
 
 err_encoder_init:
+	drm_connector_unregister(&mtk_dp->conn);
 	drm_connector_cleanup(&mtk_dp->conn);
 
 	DPTXERR("%s failed!  %d\n", __func__, __LINE__);
@@ -4474,6 +4776,7 @@ static int mtk_drm_dp_probe(struct platform_device *pdev)
 	}
 	g_mtk_dp = mtk_dp;
 	mutex_init(&dp_lock);
+	mutex_init(&mtk_dp->hdcp_mutex);
 	platform_set_drvdata(pdev, mtk_dp);
 	mtk_dp->control_task = kthread_run(mtk_dp_control_kthread,
 		(void *)mtk_dp, "mtk_dp_video_trigger");
@@ -4493,6 +4796,9 @@ static int mtk_drm_dp_remove(struct platform_device *pdev)
 
 	if (mtk_dp->dptx_wq)
 		destroy_workqueue(mtk_dp->dptx_wq);
+
+	if (mtk_dp->hdcp_wq)
+		destroy_workqueue(mtk_dp->hdcp_wq);
 
 	mutex_destroy(&dp_lock);
 	drm_connector_cleanup(&mtk_dp->conn);

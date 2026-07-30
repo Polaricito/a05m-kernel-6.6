@@ -20,7 +20,7 @@ struct v4l2_format;
 struct v4l2_fmtdesc;
 void fill_ext_mtkcam_fmtdesc(struct v4l2_fmtdesc *f);
 
-unsigned int mtk_cam_get_pixel_bits(unsigned int ipi_fmt);
+int mtk_cam_get_pixel_bits(unsigned int ipi_fmt);
 
 /* TODO: rename */
 unsigned int mtk_cam_get_img_fmt(unsigned int fourcc);

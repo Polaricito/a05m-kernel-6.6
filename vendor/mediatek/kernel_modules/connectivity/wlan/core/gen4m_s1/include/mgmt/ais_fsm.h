@@ -423,6 +423,9 @@ void aisFsmStateAbort_IBSS(IN struct ADAPTER *prAdapter, uint8_t ucBssIndex);
 void aisFsmSteps(IN struct ADAPTER *prAdapter,
 		 enum ENUM_AIS_STATE eNextState, uint8_t ucBssIndex);
 
+void aisFsmIndicateToResetFT(
+	IN struct ADAPTER *prAdapter, IN uint8_t ucBssIndex);
+
 /*----------------------------------------------------------------------------*/
 /* Mailbox Message Handling                                                   */
 /*----------------------------------------------------------------------------*/

@@ -355,7 +355,7 @@ static int rt1711_block_read(struct i2c_client *i2c,
 	ret = rt_regmap_block_read(chip->m_dev, reg, len, dst);
 #else
 	ret = rt1711_read_device(chip->client, reg, len, dst);
-#endif /* #if IS_ENABLED(CONFIG_RT_REGMAP) */
+#endif /* CONFIG_RT_REGMAP */
 	if (ret < 0)
 		dev_err(chip->dev, "rt1711 block read fail\n");
 	return ret;
@@ -370,7 +370,7 @@ static int rt1711_block_write(struct i2c_client *i2c,
 	ret = rt_regmap_block_write(chip->m_dev, reg, len, src);
 #else
 	ret = rt1711_write_device(chip->client, reg, len, src);
-#endif /* #if IS_ENABLED(CONFIG_RT_REGMAP) */
+#endif /* CONFIG_RT_REGMAP */
 	if (ret < 0)
 		dev_err(chip->dev, "rt1711 block write fail\n");
 	return ret;
@@ -558,7 +558,7 @@ static int rt1711_init_alert_mask(struct tcpc_device *tcpc)
 			| TCPC_V10_REG_ALERT_TX_FAILED
 			| TCPC_V10_REG_ALERT_RX_HARD_RST
 			| TCPC_V10_REG_ALERT_RX_STATUS
-			| TCPC_V10_REG_RX_OVERFLOW;
+			| TCPC_V10_REG_ALERT_RX_OVERFLOW;
 #endif
 
 	mask |= TCPC_REG_ALERT_FAULT;
@@ -1261,7 +1261,7 @@ static int rt1711_set_cc(struct tcpc_device *tcpc, int pull)
 	int rp_lvl = TYPEC_CC_PULL_GET_RP_LVL(pull), pull1, pull2;
 	struct rt1711_chip *chip = tcpc_get_dev_data(tcpc);
 
-	RT1711_INFO("pull = 0x%02X\n", pull);
+	RT1711_INFO("%d\n", pull);
 	pull = TYPEC_CC_PULL_GET_RES(pull);
 	if (pull == TYPEC_CC_DRP) {
 		data = TCPC_V10_REG_ROLE_CTRL_RES_SET(
@@ -1565,13 +1565,6 @@ static int rt1711_get_message(struct tcpc_device *tcpc, uint32_t *payload,
 	return rv;
 }
 
-static int rt1711_set_bist_carrier_mode(
-	struct tcpc_device *tcpc, uint8_t pattern)
-{
-	/* Don't support this function */
-	return 0;
-}
-
 #if CONFIG_USB_PD_RETRY_CRC_DISCARD
 static int rt1711_retransmit(struct tcpc_device *tcpc)
 {
@@ -1704,7 +1697,6 @@ static struct tcpc_ops rt1711_tcpc_ops = {
 	.get_message = rt1711_get_message,
 	.transmit = rt1711_transmit,
 	.set_bist_test_mode = rt1711_set_bist_test_mode,
-	.set_bist_carrier_mode = rt1711_set_bist_carrier_mode,
 #endif	/* CONFIG_USB_POWER_DELIVERY */
 
 #if CONFIG_USB_PD_RETRY_CRC_DISCARD
@@ -1780,7 +1772,7 @@ static void check_printk_performance(void)
 		nsrem = do_div(t2, 1000000000);
 		pr_info("t2-t1 = %lu\n",
 				(unsigned long)nsrem /  1000);
-		PD_BUG_ON(nsrem > 100*1000);
+		PD_WARN_ON(nsrem > 100*1000);
 	}
 #endif /* CONFIG_PD_DBG_INFO */
 }
@@ -1840,7 +1832,7 @@ static int rt1711_tcpcdev_init(struct rt1711_chip *chip, struct device *dev)
 #endif	/* CONFIG_TCPC_VCONN_SUPPLY_MODE */
 
 	if (of_property_read_string(np, "rt-tcpc,name",
-				(char const **)&name) < 0) {
+				(const char **)&name) < 0) {
 		dev_info(dev, "use default name\n");
 	}
 

@@ -154,8 +154,8 @@ static enum ged_apo_legacy g_apo_legacy;
 
 #endif /* CONFIG_MTK_GPU_APO_SUPPORT */
 
-static int g_whitebox_support_flag;
-static int mcu_replace;
+static unsigned int g_whitebox_support_flag;
+static unsigned int mcu_replace;
 int stat_mcu_store[30][30]={0};
 
 static int g_autosuspend_stress;
@@ -725,7 +725,7 @@ unsigned int ged_gpu_power_stress_test_enable(void)
 EXPORT_SYMBOL(ged_gpu_power_stress_test_enable);
 #endif /* MTK_GPU_POWER_ON_OFF_TEST */
 
-unsigned int ged_gpu_whitebox_power_test_support(int support_flag)
+unsigned int ged_gpu_whitebox_power_test_support(unsigned int support_flag)
 {
 	g_whitebox_support_flag = support_flag;
 
@@ -733,7 +733,7 @@ unsigned int ged_gpu_whitebox_power_test_support(int support_flag)
 }
 EXPORT_SYMBOL(ged_gpu_whitebox_power_test_support);
 
-unsigned int ged_gpu_whitebox_power_test_case(int replace)
+unsigned int ged_gpu_whitebox_power_test_case(unsigned int replace)
 {
 	mcu_replace = replace;
 

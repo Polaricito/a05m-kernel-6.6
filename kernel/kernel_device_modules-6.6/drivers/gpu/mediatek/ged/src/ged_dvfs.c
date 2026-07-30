@@ -3232,7 +3232,7 @@ static void ged_dvfs_set_bottom_gpu_freq(unsigned int ui32FreqLevel)
 	mutex_unlock(&gsDVFSLock);
 }
 
-static unsigned int ged_dvfs_get_gpu_freq_level_count(void)
+static int ged_dvfs_get_gpu_freq_level_count(void)
 {
 	return ged_get_opp_num_real();
 }

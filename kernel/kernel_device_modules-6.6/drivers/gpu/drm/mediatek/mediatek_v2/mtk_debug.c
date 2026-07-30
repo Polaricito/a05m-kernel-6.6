@@ -185,11 +185,13 @@ static char *debug_buffer;
 
 #if IS_ENABLED(CONFIG_MTK_DISP_LOGGER)
 unsigned int g_trace_log = 1;
+static bool logger_enable = 1;
 #else
 unsigned int g_trace_log;
+static bool logger_enable;
 #endif
 
-static bool logger_enable = 1;
+static bool pr_logger_enable = 1;
 
 
 struct DISP_PANEL_BASE_VOLTAGE base_volageg;
@@ -514,7 +516,7 @@ int mtk_dprec_logger_pr(unsigned int type, char *fmt, ...)
 	char *buf = NULL;
 	int len = 0;
 
-	if (!logger_enable)
+	if (!pr_logger_enable)
 		return -1;
 
 	if (type >= DPREC_LOGGER_PR_NUM)
@@ -821,7 +823,7 @@ unsigned int mtkfb_get_spr_type(void)
 
 	if (IS_ERR_OR_NULL(crtc)) {
 		DDPMSG("%s failed to find crtc\n", __func__);
-		return -EINVAL;
+		return MTK_PANEL_INVALID_TYPE;
 	}
 
 	ret = mtk_get_cur_spr_type(crtc);
@@ -1425,7 +1427,10 @@ static int wait_frame_wq(struct frame_condition_wq *wq, int timeout)
 
 	ret = wait_event_timeout(wq->wq, atomic_read(&wq->condition), timeout);
 
-	atomic_set(&wq->condition, 0);
+	if (ret < timeout)
+		atomic_set(&wq->condition, 0);
+	else
+		DDPMSG("%s %d : wait frame wq timeout!\n", __func__, ret);
 
 	return ret;
 }
@@ -2475,7 +2480,7 @@ static const struct mtk_cwb_funcs user_cwb_funcs = {
 static void mtk_drm_cwb_info_init(struct drm_crtc *crtc)
 {
 	struct mtk_drm_crtc *mtk_crtc = to_mtk_crtc(crtc);
-	int crtc_idx = drm_crtc_index(&mtk_crtc->base);
+	int crtc_idx = drm_crtc_index(&mtk_crtc->base), i;
 	struct mtk_drm_private *priv = mtk_crtc->base.dev->dev_private;
 	struct mtk_cwb_info *cwb_info = mtk_crtc->cwb_info;
 
@@ -2488,7 +2493,7 @@ static void mtk_drm_cwb_info_init(struct drm_crtc *crtc)
 	cwb_info->count = 0;
 
 	if (cwb_info->scn == NONE)
-		cwb_info->scn = WDMA_WRITE_BACK_OVL;
+		cwb_info->scn = WDMA_WRITE_BACK;
 
 	/* Check if wdith height size will be affect by resolution switch */
 	mtk_crtc_set_width_height(&(cwb_info->src_roi.width), &(cwb_info->src_roi.height),
@@ -2499,6 +2504,8 @@ static void mtk_drm_cwb_info_init(struct drm_crtc *crtc)
 			cwb_info->comp = priv->ddp_comp[DDP_COMPONENT_WDMA0];
 			if (priv->data->mmsys_id == MMSYS_MT6989 || priv->data->mmsys_id == MMSYS_MT6899)
 				cwb_info->comp = priv->ddp_comp[DDP_COMPONENT_WDMA1];
+			if (priv->data->mmsys_id == MMSYS_MT6991)
+				cwb_info->comp = priv->ddp_comp[DDP_COMPONENT_WDMA4];
 		}
 		else if ((priv->data->mmsys_id == MMSYS_MT6985 ||
 					priv->data->mmsys_id == MMSYS_MT6897)
@@ -2506,18 +2513,19 @@ static void mtk_drm_cwb_info_init(struct drm_crtc *crtc)
 			cwb_info->comp = priv->ddp_comp[DDP_COMPONENT_OVLSYS_WDMA1];
 		else if (priv->data->mmsys_id == MMSYS_MT6989 || priv->data->mmsys_id == MMSYS_MT6899)
 			cwb_info->comp = priv->ddp_comp[DDP_COMPONENT_OVLSYS_WDMA1];
+		else if (priv->data->mmsys_id == MMSYS_MT6991)
+			cwb_info->comp = priv->ddp_comp[DDP_COMPONENT_OVLSYS_WDMA0];
 	}
 
 	if (!cwb_info->buffer[0].dst_roi.width ||
 		!cwb_info->buffer[0].dst_roi.height) {
-		mtk_rect_make(&cwb_info->buffer[0].dst_roi, 0, 0,
-			crtc->state->adjusted_mode.hdisplay,
-			crtc->state->adjusted_mode.hdisplay);
-		mtk_rect_make(&cwb_info->buffer[1].dst_roi, 0, 0,
-			crtc->state->adjusted_mode.hdisplay,
-			crtc->state->adjusted_mode.hdisplay);
+		for (i = 0; i < CWB_BUFFER_NUM; i++) {
+			mtk_rect_make(&cwb_info->buffer[i].dst_roi,
+			0, 0, crtc->state->adjusted_mode.hdisplay, crtc->state->adjusted_mode.vdisplay);
+		}
 	}
 
+	mutex_init(&cwb_info->cwb_mutex);
 	/*alloc && config two fb*/
 	if (!cwb_info->buffer[0].fb)
 		set_cwb_info_buffer(crtc, 0);
@@ -3403,6 +3411,10 @@ static void process_dbg_opt(const char *opt)
 			logger_enable = 1;
 		} else if (strncmp(opt + 7, "off", 3) == 0) {
 			logger_enable = 0;
+		} else if (strncmp(opt + 7, "proff", 5) == 0) {
+			pr_logger_enable = 0;
+		} else if (strncmp(opt + 7, "pron", 4) == 0) {
+			pr_logger_enable = 1;
 		}
 	} else if (strncmp(opt, "diagnose", 8) == 0) {
 		struct drm_crtc *crtc;
@@ -3577,6 +3589,7 @@ static void process_dbg_opt(const char *opt)
 		mtk_drm_set_idle_check_interval(crtc, idle_check_interval);
 		DDPMSG("change idle interval to %llu ms\n",
 		       idle_check_interval);
+#if IS_ENABLED(CONFIG_MTK_DISP_DEBUG)
 	} else if (strncmp(opt, "idle_perf:", 10) == 0) {
 		struct drm_crtc *crtc;
 
@@ -3678,6 +3691,7 @@ static void process_dbg_opt(const char *opt)
 		}
 		DDPMSG("%s: idle_perf_aee:%ums\n", __func__, value);
 		mtk_drm_idlegmr_perf_aee_control(value);
+#endif
 	} else if (strncmp(opt, "idle_by_wb:", 11) == 0) {
 		struct drm_crtc *crtc;
 		int value;
@@ -4748,6 +4762,8 @@ static void process_dbg_opt(const char *opt)
 			cwb_info->scn = WDMA_WRITE_BACK;
 		else if (path == 1)
 			cwb_info->scn = WDMA_WRITE_BACK_OVL;
+		else if (path == 3)
+			cwb_info->scn = WDMA_WRITE_BACK_EXDMA_DL;
 
 		DDP_MUTEX_UNLOCK(&mtk_crtc->lock, __func__, __LINE__);
 
@@ -5431,9 +5447,11 @@ static void process_dbg_opt(const char *opt)
 	} else if (strncmp(opt, "lcd:", 4) == 0) {
 		struct mtk_drm_private *priv = drm_dev->dev_private;
 
-		if (strncmp(opt + 4, "on", 2) == 0)
+		if (strncmp(opt + 4, "offon", strlen("offon")) == 0)
+			noti_uevent_user(&priv->uevent_data, 2);
+		else if (strncmp(opt + 4, "on", strlen("on")) == 0)
 			noti_uevent_user(&priv->uevent_data, 1);
-		else if (strncmp(opt + 4, "off", 3) == 0)
+		else if (strncmp(opt + 4, "off", strlen("off")) == 0)
 			noti_uevent_user(&priv->uevent_data, 0);
 	} else if (strncmp(opt, "wait_frame_test:", strlen("wait_frame_test:")) == 0) {
 		if (strncmp(opt + strlen("wait_frame_test:"), "1", 1) == 0)
@@ -5537,21 +5555,28 @@ static ssize_t cwb_debug_read(struct file *file, char __user *ubuf, size_t count
 	height = cwb_info->src_roi.height;
 	Bpp = mtk_get_format_bpp(cwb_info->buffer[0].fb->format->format);
 	cwb_buffer_size = sizeof(u8) * width * height * Bpp;
-	if (cwb_buffer_idx < 0 || cwb_buffer_idx >= CWB_BUFFER_NUM)
+
+	mutex_lock(&cwb_info->cwb_mutex);
+	if (cwb_buffer_idx < 0 || cwb_buffer_idx >= CWB_BUFFER_NUM) {
+		mutex_unlock(&cwb_info->cwb_mutex);
 		return -EFAULT;
+	}
 	addr_va = cwb_info->buffer[cwb_buffer_idx].addr_va;
 	if (*ppos != 0)
 		goto out;
 
 	n = cwb_buffer_size;
 out:
+	mutex_unlock(&cwb_info->cwb_mutex);
 	if (n < 0)
 		return -EINVAL;
 	ret = simple_read_from_buffer(ubuf, count, ppos, (void *)addr_va, n);
 	if (ret == 0) {
+		mutex_lock(&cwb_info->cwb_mutex);
 		cwb_buffer_idx += 1;
 		if (cwb_buffer_idx >= CWB_BUFFER_NUM)
 			cwb_buffer_idx = 0;
+		mutex_unlock(&cwb_info->cwb_mutex);
 	}
 	return ret;
 }
@@ -6125,7 +6150,7 @@ void disp_dbg_probe(void)
 			S_IFREG | 0644,	d_folder, NULL, &disp_lfr_params_fops);
 	}
 #endif
-	if(logger_enable) {
+	if(pr_logger_enable) {
 #if IS_ENABLED(CONFIG_MTK_MME_SUPPORT)
 		init_mme_buffer();
 #else
@@ -6292,7 +6317,7 @@ void disp_dbg_deinit(void)
 void get_disp_dbg_buffer(unsigned long *addr, unsigned long *size,
 	unsigned long *start)
 {
-	if (logger_enable)
+	if (pr_logger_enable)
 		init_log_buffer();
 	if (atomic_read(&is_buffer_init) == 1) {
 		*addr = (unsigned long)err_buffer[0];

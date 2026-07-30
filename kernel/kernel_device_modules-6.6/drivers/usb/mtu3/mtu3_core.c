@@ -215,6 +215,8 @@ static inline void mtu3_hs_softconn_set(struct mtu3 *mtu, bool enable)
 	} else {
 		mtu3_clrbits(mtu->mac_base, U3D_POWER_MANAGEMENT,
 			SOFT_CONN | SUSPENDM_ENABLE);
+		/* Delay for eUSB2 port reset signal */
+		mdelay(4);
 	}
 	dev_dbg(mtu->dev, "SOFTCONN = %d\n", !!enable);
 }
@@ -302,6 +304,8 @@ static void mtu3_dev_power_on(struct mtu3 *mtu)
 static void mtu3_dev_power_down(struct mtu3 *mtu)
 {
 	void __iomem *ibase = mtu->ippc_base;
+
+	ssusb_wait_power_state(mtu->ssusb, MTU3_STATE_POWER_OFF);
 
 	if (mtu->u3_capable)
 		mtu3_setbits(ibase, SSUSB_U3_CTRL(0), SSUSB_U3_PORT_PDN);
@@ -598,7 +602,7 @@ void mtu3_start(struct mtu3 *mtu)
 
 	if (mtu->softconnect)
 		mtu3_dev_on_off(mtu, 1);
-	else if (!mtu->is_gadget_ready)
+	else if (!mtu->is_gadget_ready && !mtu->bypass_manual_pu)
 		ssusb_phy_dp_pullup(mtu->ssusb);
 
 	/* set vbus limit*/
@@ -959,7 +963,7 @@ static irqreturn_t mtu3_link_isr(struct mtu3 *mtu)
 		pm_runtime_get(mtu->dev);
 		mtu3_ep0_setup(mtu);
 
-		if (udev_speed >= MTU3_SPEED_SUPER)
+		if (udev_speed >= MTU3_SPEED_SUPER && !mtu->bypass_manual_pu)
 			ssusb_phy_dp_pullup(mtu->ssusb);
 	}
 
@@ -1267,6 +1271,8 @@ int ssusb_gadget_init(struct ssusb_mtk *ssusb)
 
 	dev_info(dev, "max_speed_host: %s\n", usb_speed_string(mtu->max_speed_host));
 
+	mtu->bypass_manual_pu = of_property_read_bool(dev->of_node, "mediatek,bypass-manual-pu");
+	dev_info(dev, "bypass_manual_pu: %d\n", mtu->bypass_manual_pu);
 
 	ret = mtu3_set_dma_mask(mtu);
 	if (ret) {

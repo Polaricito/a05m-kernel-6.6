@@ -85,13 +85,56 @@ EXPORT_SYMBOL(fpsgo_notify_fbt_is_boost_fp);
 /************************* scheduler common ************************/
 
 /* runnable_boost_enable ctrl */
+#define DEFAULT_RUNNABLE_BOOST_CPUS 0XFF
 static bool runnable_boost_enable = DEFAULT_RUNNABLE_BOOST;
+static bool runnable_boost_all_cpus = DEFAULT_RUNNABLE_BOOST;
+cpumask_t runnable_boost_cpumask;
+static DEFINE_MUTEX(runnable_boost_mutex);
 
 void set_runnable_boost_enable(bool boost_ctrl)
 {
 	runnable_boost_enable = boost_ctrl;
 }
 EXPORT_SYMBOL(set_runnable_boost_enable);
+module_param_named(runnable_boost_enable, runnable_boost_enable, bool, 0600);
+
+inline struct cpumask *get_runnable_boost_cpumask(void)
+{
+	return &runnable_boost_cpumask;
+}
+EXPORT_SYMBOL(get_runnable_boost_cpumask);
+
+inline bool is_runnable_boost_all(void)
+{
+	return runnable_boost_all_cpus;
+}
+EXPORT_SYMBOL(is_runnable_boost_all);
+
+void reset_runnable_boost_with_cpumask(void)
+{
+	runnable_boost_cpumask.bits[0] = DEFAULT_RUNNABLE_BOOST_CPUS;
+	runnable_boost_all_cpus = DEFAULT_RUNNABLE_BOOST;
+}
+
+void set_runnable_boost_with_cpumask(bool boost_ctrl, int runnable_boost_cpus)
+{
+	mutex_lock(&runnable_boost_mutex);
+	if (runnable_boost_cpus == -1){
+		reset_runnable_boost_with_cpumask();
+		goto out;
+	}
+
+	if (runnable_boost_cpus < 0 || runnable_boost_cpus > 255)
+		goto out;
+
+	runnable_boost_all_cpus = false;
+	runnable_boost_cpumask.bits[0] = runnable_boost_cpus;
+out:
+	runnable_boost_enable = boost_ctrl;
+	mutex_unlock(&runnable_boost_mutex);
+
+}
+EXPORT_SYMBOL(set_runnable_boost_with_cpumask);
 
 void unset_runnable_boost_enable(void)
 {

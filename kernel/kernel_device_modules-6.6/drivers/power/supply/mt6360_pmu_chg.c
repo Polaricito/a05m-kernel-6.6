@@ -384,12 +384,6 @@ struct mt6360_chg_info {
 	u8 ctd_dischg_status;
 	/* otg_vbus */
 	struct regulator_dev *otg_rdev;
-
-	/* block BC1.2 during hardreset */
-	bool is_in_hardreset;
-	u32 cable_type;
-	struct delayed_work hardreset_work;
-	struct delayed_work tcpc_notify_work;
 };
 
 
@@ -974,49 +968,6 @@ static int mt6360_chgdet_pre_process(struct mt6360_chg_info *mci)
 	return __mt6360_enable_usbchgen(mci, attach);
 }
 
-static int mt6360_toggle_usbchgen(struct mt6360_chg_info *mci)
-{
-	int ret = 0;
-
-	dev_info(mci->dev, "%s\n", __func__);
-
-	ret = regmap_update_bits(mci->regmap, MT6360_PMU_DEVICE_TYPE,
-							MT6360_USBCHGEN_MASK, 0);
-	if (ret < 0)
-		dev_err(mci->dev, "%s: clr usbchgen fail\n", __func__);
-
-	udelay(100);
-
-	ret = regmap_update_bits(mci->regmap, MT6360_PMU_DEVICE_TYPE,
-							MT6360_USBCHGEN_MASK, 0xff);
-	if (ret < 0)
-		dev_err(mci->dev, "%s: set usbchgen fail\n", __func__);
-
-	return ret;
-}
-
-static void mt6360_in_hardreset_handler(struct work_struct *work)
-{
-	struct mt6360_chg_info *mci = container_of(work,
-					struct mt6360_chg_info, hardreset_work.work);
-
-	dev_info(mci->dev, "%s\n", __func__);
-	mci->is_in_hardreset = false;
-}
-
-static void mt6360_set_is_in_hardreset(struct mt6360_chg_info *mci, bool in_hardreset)
-{
-	dev_info(mci->dev, "%s: set %u\n", __func__, in_hardreset);
-
-	if(mci->is_in_hardreset) {
-		cancel_delayed_work(&mci->hardreset_work);
-		schedule_delayed_work(&mci->hardreset_work, msecs_to_jiffies(10000));
-	} else
-		cancel_delayed_work(&mci->hardreset_work);
-
-	mci->is_in_hardreset = in_hardreset;
-}
-
 static int mt6360_chgdet_post_process(struct mt6360_chg_info *mci)
 {
 	int ret = 0;
@@ -1042,11 +993,6 @@ static int mt6360_chgdet_post_process(struct mt6360_chg_info *mci)
 		mci->psy_desc.type = POWER_SUPPLY_TYPE_UNKNOWN;
 		mci->psy_usb_type = POWER_SUPPLY_USB_TYPE_UNKNOWN;
 		goto out;
-	}  else if (mci->is_in_hardreset &&
-				(mci->psy_desc.type == POWER_SUPPLY_TYPE_UNKNOWN)) {
-		dev_info(mci->dev, "%s: is_in_hardreset\n", __func__);
-		mci->attach = false;
-		return mt6360_toggle_usbchgen(mci);
 	}
 
 	/* Plug in */
@@ -1411,9 +1357,6 @@ static int __mt6360_enable_chg_type_det(struct mt6360_chg_info *mci, bool en)
 	atomic_set(&mci->tcpc_attach, en);
 	ret = (en ? mt6360_chgdet_pre_process :
 		    mt6360_chgdet_post_process)(mci);
-
-	if (!en)
-		mt6360_set_is_in_hardreset(mci, false);
 out:
 	mutex_unlock(&mci->chgdet_lock);
 	return ret;
@@ -3663,64 +3606,6 @@ static int mt6360_boost_get_current_limit(struct regulator_dev *rdev)
 	return mt6360_otg_oc_threshold[ret];
 }
 
-#if IS_ENABLED(CONFIG_TCPC_CLASS)
-static int pd_tcp_notifier_call(struct notifier_block *nb,
-					unsigned long event, void *data)
-{
-	struct tcp_notify *noti = data;
-	struct mt6360_chg_info *mci = container_of(nb,
-		struct mt6360_chg_info, pd_nb);
-
-	switch (event) {
-	case TCP_NOTIFY_HARD_RESET_STATE:
-		mutex_lock(&mci->chgdet_lock);
-		if (noti->hreset_state.state >= TCP_HRESET_SIGNAL_SEND
-			&& mci->cable_type == TCPC_CABLE_TYPE_C2C)
-			mt6360_set_is_in_hardreset(mci, true);
-		else
-			mt6360_set_is_in_hardreset(mci, false);
-		mutex_unlock(&mci->chgdet_lock);
-
-		break;
-	case TCP_NOTIFY_PD_STATE:
-		dev_info(mci->dev, "%s pd state = %d\n",
-			__func__, noti->pd_state.connected);
-		if ((noti->pd_state.connected == PD_CONNECT_NONE) ||
-			(noti->pd_state.connected == PD_CONNECT_HARD_RESET))
-			mt6360_set_is_in_hardreset(mci, false);
-		break;
-	case TCP_NOTIFY_CABLE_TYPE:
-		mci->cable_type = noti->cable_type.type;
-		break;
-	default:
-		break;
-	};
-
-	return NOTIFY_OK;
-}
-
-static void mt6360_tcpc_notify_handler(struct work_struct *work)
-{
-	struct mt6360_chg_info *mci = container_of(work,
-				struct mt6360_chg_info, tcpc_notify_work.work);
-	int ret;
-
-	dev_info(mci->dev, "%s\n", __func__);
-
-	mci->tcpc_dev = tcpc_dev_get_by_name("type_c_port0");
-	if (!mci->tcpc_dev) {
-		pr_notice("%s get tcpc device type_c_port0 fail\n", __func__);
-		return;
-	}
-
-	mci->pd_nb.notifier_call = pd_tcp_notifier_call;
-	ret = register_tcp_dev_notifier(mci->tcpc_dev, &mci->pd_nb,
-						TCP_NOTIFY_TYPE_ALL);
-	if (ret < 0)
-		pr_notice("%s: register tcpc notifer fail\n", __func__);
-}
-#endif
-
 static const struct regulator_ops mt6360_chg_otg_ops = {
 	.list_voltage = regulator_list_voltage_linear,
 	.enable = mt6360_boost_enable,
@@ -3810,8 +3695,6 @@ static int mt6360_pmu_chg_probe(struct platform_device *pdev)
 		INIT_WORK(&mci->chgdet_work, mt6360_chgdet_work_handler);
 
 	platform_set_drvdata(pdev, mci);
-
-	INIT_DELAYED_WORK(&mci->hardreset_work, mt6360_in_hardreset_handler);
 
 	/* get parent regmap */
 	mci->regmap = dev_get_regmap(pdev->dev.parent, NULL);
@@ -3920,11 +3803,6 @@ static int mt6360_pmu_chg_probe(struct platform_device *pdev)
 	/* Schedule work for microB's BC1.2 */
 	if (!IS_ENABLED(CONFIG_TCPC_CLASS) && pdata->bc12_sel == 0)
 		schedule_work(&mci->chgdet_work);
-#if IS_ENABLED(CONFIG_TCPC_CLASS)
-	mci->is_in_hardreset = false;
-	INIT_DELAYED_WORK(&mci->tcpc_notify_work, mt6360_tcpc_notify_handler);
-	schedule_delayed_work(&mci->tcpc_notify_work, msecs_to_jiffies(5000));
-#endif
 
 	dev_info(&pdev->dev, "%s: successfully probed\n", __func__);
 	return 0;

@@ -264,7 +264,6 @@ saaFsmSteps(IN struct ADAPTER *prAdapter,
 				if (rStatus != WLAN_STATUS_SUCCESS) {
 					cnmTimerInitTimer(prAdapter,
 					   &prStaRec->rTxReqDoneOrRxRespTimer,
-					   (PFN_MGMT_TIMEOUT_FUNC)
 					   saaFsmRunEventTxReqTimeOut,
 					   (unsigned long) prStaRec);
 
@@ -312,7 +311,6 @@ saaFsmSteps(IN struct ADAPTER *prAdapter,
 				if (rStatus != WLAN_STATUS_SUCCESS) {
 					cnmTimerInitTimer(prAdapter,
 					   &prStaRec->rTxReqDoneOrRxRespTimer,
-					   (PFN_MGMT_TIMEOUT_FUNC)
 					   saaFsmRunEventTxReqTimeOut,
 					   (unsigned long) prStaRec);
 
@@ -353,7 +351,6 @@ saaFsmSteps(IN struct ADAPTER *prAdapter,
 				if (rStatus != WLAN_STATUS_SUCCESS) {
 					cnmTimerInitTimer(prAdapter,
 					    &prStaRec->rTxReqDoneOrRxRespTimer,
-					    (PFN_MGMT_TIMEOUT_FUNC)
 					    saaFsmRunEventTxReqTimeOut,
 					    (unsigned long) prStaRec);
 
@@ -615,6 +612,13 @@ void saaFsmRunEventStart(IN struct ADAPTER *prAdapter,
 	}
 	/* 4 <7> Trigger SAA FSM */
 	if (prStaRec->ucStaState == STA_STATE_1) {
+		/* Indicate supplicant to reset FT process */
+		if (IS_AP_STA(prStaRec) &&
+		    prStaRec->ucAuthAlgNum ==
+				(uint8_t) AUTH_ALGORITHM_NUM_OPEN_SYSTEM)
+			aisFsmIndicateToResetFT(prAdapter,
+					prStaRec->ucBssIndex);
+
 		if (prStaRec->ucAuthAlgNum == AUTH_ALGORITHM_NUM_SAE) {
 			prStaRec->u2StatusCode = WPA3_AUTH_SAE_NO_RESP;
 			saaFsmSteps(prAdapter, prStaRec,
@@ -758,7 +762,6 @@ saaFsmRunEventTxDone(IN struct ADAPTER *prAdapter,
 
 				cnmTimerInitTimer(prAdapter,
 				    &prStaRec->rTxReqDoneOrRxRespTimer,
-				    (PFN_MGMT_TIMEOUT_FUNC)
 				    saaFsmRunEventRxRespTimeOut,
 				    (unsigned long) prStaRec);
 
@@ -811,7 +814,6 @@ saaFsmRunEventTxDone(IN struct ADAPTER *prAdapter,
 
 				cnmTimerInitTimer(prAdapter,
 				      &prStaRec->rTxReqDoneOrRxRespTimer,
-				      (PFN_MGMT_TIMEOUT_FUNC)
 				      saaFsmRunEventRxRespTimeOut,
 				      (unsigned long) prStaRec);
 
@@ -864,8 +866,7 @@ saaFsmRunEventTxDone(IN struct ADAPTER *prAdapter,
 
 				cnmTimerInitTimer(prAdapter,
 				      &prStaRec->rTxReqDoneOrRxRespTimer,
-				      (PFN_MGMT_TIMEOUT_FUNC)
-					saaFsmRunEventRxRespTimeOut,
+				      saaFsmRunEventRxRespTimeOut,
 				      (unsigned long) prStaRec);
 
 				cnmTimerStartTimer(prAdapter,

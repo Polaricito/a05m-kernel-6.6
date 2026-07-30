@@ -89,6 +89,7 @@
 #define OUI_QCA 0x001374
 #define OUI_MTK 0x000CE7
 
+/* QCA-OUI subcmds */
 #define NL80211_VENDOR_SUBCMD_GET_PREFER_FREQ_LIST 103
 #define NL80211_VENDOR_SUBCMD_ACS 54
 #define NL80211_VENDOR_SUBCMD_DFS_OFFLOAD_CAC_STARTED 56
@@ -281,6 +282,12 @@ enum LOGGER_ATTRIBUTE {
 	LOGGER_ATTRIBUTE_DRIVER_VER = 1,
 	LOGGER_ATTRIBUTE_FW_VER     = 2,
 	LOGGER_ATTRIBUTE_MAX	    = 3
+};
+
+enum STRING_ATTRIBUTE {
+	STRING_ATTRIBUTE_INVALID = 0,
+	STRING_ATTRIBUTE_DATA    = 1,
+	STRING_ATTRIBUTE_MAX     = 2
 };
 
 enum RTT_ATTRIBUTE {
@@ -509,6 +516,10 @@ extern const struct nla_policy qca_roaming_param_policy[
 
 extern const struct nla_policy nla_get_apf_policy[
 		APF_ATTRIBUTE_MAX + 1];
+
+extern const struct nla_policy nla_string_cmd_policy[
+		STRING_ATTRIBUTE_MAX + 1];
+
 
 /*******************************************************************************
  *                           MACROS
@@ -1213,11 +1224,12 @@ enum PARAM_GENERIC_RESPONSE_ID {
 	GRID_SWPIS_BCN_INFO_ABORT,			/* 3 */
 	GRID_SWPIS_CONNECTIVITY_LOG,			/* 4 */
 	GRID_MANAGE_FREQ_LIST,				/* 5 */
-	GRID_RESET_FT_PROCESS,				/* 6 */
+	GRID_RESET_FT_PROCESS = 7,			/* 7 */
 };
 
 struct PARAM_RESET_FT {
 	uint8_t id;
+	uint8_t len;
 };
 
 #if (CFG_TC10_FEATURE == 1)
@@ -1444,5 +1456,8 @@ int mtk_cfg80211_vendor_get_usable_channel(
 	struct wiphy *wiphy, struct wireless_dev *wdev,
 	const void *data, int data_len);
 #endif
+
+int mtk_cfg80211_vendor_string_cmd(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void *data, int data_len);
 
 #endif /* _GL_VENDOR_H */

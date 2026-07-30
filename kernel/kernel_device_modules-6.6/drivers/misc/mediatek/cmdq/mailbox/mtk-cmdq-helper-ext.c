@@ -2502,9 +2502,10 @@ s32 cmdq_pkt_poll_sleep(struct cmdq_pkt *pkt, u32 value,
 	s32 err;
 	const u16 reg_idx = CMDQ_THR_SPR_IDX1;
 	bool spr3_timer = pkt->support_spr3_timer;
+	struct cmdq_client *cl = pkt->cl;
 
-	if (!spr3_timer) {
-		cmdq_msg("pkt:0x%p skip poll_sleep", pkt);
+	if (!spr3_timer || !cl) {
+		cmdq_log("pkt:0x%p poll sleep not support or no client", pkt);
 		return -EINVAL;
 	}
 
@@ -2514,6 +2515,9 @@ s32 cmdq_pkt_poll_sleep(struct cmdq_pkt *pkt, u32 value,
 		if (err != 0)
 			return err;
 	}
+
+	/* set timer event for current thread */
+	cmdq_pkt_set_event(pkt, cmdq_mbox_chan_id(cl->chan) + CMDQ_EVENT_SPR_TIMER);
 
 	cmdq_pkt_assign_command(pkt, reg_idx, (dma_addr_t)addr | CMDQ_ADDR_LOW_BIT);
 

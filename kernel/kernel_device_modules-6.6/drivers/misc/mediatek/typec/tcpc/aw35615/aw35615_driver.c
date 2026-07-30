@@ -194,13 +194,13 @@ static int aw35615_set_bist_test_mode(struct tcpc_device *tcpc, bool en)
 	AW_LOG("enter\n");
 	return 0;
 }
-
+/*
 static int aw35615_set_bist_carrier_mode(struct tcpc_device *tcpc, uint8_t pattern)
 {
 	AW_LOG("enter\n");
 	return 0;
 }
-
+*/
 static int aw35615_retransmit(struct tcpc_device *tcpc)
 {
 	AW_LOG("enter\n");
@@ -302,7 +302,7 @@ static struct tcpc_ops aw35615_tcpc_ops = {
 	.get_message = aw35615_get_message,
 	.transmit = aw35615_transmit,
 	.set_bist_test_mode = aw35615_set_bist_test_mode,
-	.set_bist_carrier_mode = aw35615_set_bist_carrier_mode,
+	//.set_bist_carrier_mode = aw35615_set_bist_carrier_mode,
 	.retransmit = aw35615_retransmit,
 #ifndef AW_KERNEL_VER_OVER_6_6_0
 	.get_alert_status = aw35615_get_alert_status,

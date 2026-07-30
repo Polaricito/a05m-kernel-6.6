@@ -141,12 +141,12 @@ static ssize_t total_gpu_freq_level_count_show(struct kobject *kobj,
 		struct kobj_attribute *attr,
 		char *buf)
 {
-	unsigned int ui32FreqLevelCount;
+	int i32FreqLevelCount;
 
-	if (false == mtk_custom_get_gpu_freq_level_count(&ui32FreqLevelCount))
-		ui32FreqLevelCount = 0;
+	if (false == mtk_custom_get_gpu_freq_level_count(&i32FreqLevelCount))
+		i32FreqLevelCount = 0;
 
-	return scnprintf(buf, PAGE_SIZE, "%u\n", ui32FreqLevelCount);
+	return scnprintf(buf, PAGE_SIZE, "%d\n", i32FreqLevelCount);
 }
 
 static KOBJ_ATTR_RO(total_gpu_freq_level_count);
@@ -1283,7 +1283,7 @@ static ssize_t whitebox_power_support_show(struct kobject *kobj,
 		struct kobj_attribute *attr,
 		char *buf)
 {
-	int support_flag = 0;
+	unsigned int support_flag = 0;
 	int pos = 0;
 
 	support_flag = ged_get_whitebox_power_test_support();
@@ -1300,12 +1300,12 @@ static ssize_t whitebox_power_support_store(struct kobject *kobj,
 		const char *buf, size_t count)
 {
 	char acBuffer[GED_SYSFS_MAX_BUFF_SIZE];
-	u32 i32Value = 0;
+	unsigned int u32Value = 0;
 
 	if ((count > 0) && (count < GED_SYSFS_MAX_BUFF_SIZE)) {
 		if (scnprintf(acBuffer, GED_SYSFS_MAX_BUFF_SIZE, "%s", buf)) {
-			if (kstrtoint(acBuffer, 0, &i32Value) == 0)
-				ged_gpu_whitebox_power_test_support((int)i32Value);
+			if (kstrtoint(acBuffer, 0, &u32Value) == 0)
+				ged_gpu_whitebox_power_test_support(u32Value);
 		}
 	}
 
@@ -1318,7 +1318,7 @@ static ssize_t whitebox_power_force_state_show(struct kobject *kobj,
 		struct kobj_attribute *attr,
 		char *buf)
 {
-	int force_state = 0;
+	unsigned int force_state = 0;
 	int pos = 0;
 	int state6_3 = 0;
 	int state7_3 = 0;
@@ -1330,7 +1330,7 @@ static ssize_t whitebox_power_force_state_show(struct kobject *kobj,
 	state20_3 = stat_mcu_store[20][3];
 
 	pos += scnprintf(buf + pos, PAGE_SIZE - pos,
-				"stat_mcu_store[6][3]=%d, stat_mcu_store[7][3]=%d, stat_mcu_store[20][3]=%d, force_state=%d\n",
+				"stat_mcu_store[6][3]=%d, stat_mcu_store[7][3]=%d, stat_mcu_store[20][3]=%d, force_state=%u\n",
 					state6_3, state7_3, state20_3, force_state);
 
 	return pos;
@@ -1346,7 +1346,7 @@ static ssize_t whitebox_power_force_state_store(struct kobject *kobj,
 	if ((count > 0) && (count < GED_SYSFS_MAX_BUFF_SIZE)) {
 		if (scnprintf(acBuffer, GED_SYSFS_MAX_BUFF_SIZE, "%s", buf)) {
 			if (kstrtouint(acBuffer, 0, &u32Value) == 0)
-				ged_gpu_whitebox_power_test_case((int)u32Value);
+				ged_gpu_whitebox_power_test_case(u32Value);
 		}
 	}
 

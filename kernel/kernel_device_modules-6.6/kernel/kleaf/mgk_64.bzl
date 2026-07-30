@@ -20,6 +20,7 @@ mgk_64_defconfig = "mediatek-bazel_defconfig"
 mgk_64_kleaf_modules = [
     # keep sorted
     "//vendor/mediatek/kernel_modules/connectivity/bt/linux_v2:btmtk_uart_unify",
+    "//vendor/mediatek/kernel_modules/connectivity/bt/linux_v2_mt6653:btmtk_uart_unify_mt6653",
     "//vendor/mediatek/kernel_modules/connectivity/bt/mt66xx:btif",
     "//vendor/mediatek/kernel_modules/connectivity/bt/mt66xx/wmt:wmt",
     #"//vendor/mediatek/kernel_modules/connectivity/bt/mt76xx/sdio:btmtksdio",
@@ -37,12 +38,13 @@ mgk_64_kleaf_modules = [
     "//vendor/mediatek/kernel_modules/connectivity/gps/gps_pwr:gps_pwr",
     "//vendor/mediatek/kernel_modules/connectivity/gps/gps_scp:gps_scp",
     "//vendor/mediatek/kernel_modules/connectivity/gps/gps_stp:gps_drv_stp",
+    "//vendor/mediatek/kernel_modules/connectivity/gps/capid_util:gps_meta_capid_util",
     "//vendor/mediatek/kernel_modules/connectivity/wlan/adaptor/build/connac1x:wmt_chrdev_wifi",
     "//vendor/mediatek/kernel_modules/connectivity/wlan/adaptor/build/connac2x:wmt_chrdev_wifi_connac2",
     "//vendor/mediatek/kernel_modules/connectivity/wlan/adaptor/build/connac3x:wmt_chrdev_wifi_connac3",
     "//vendor/mediatek/kernel_modules/connectivity/wlan/adaptor/wlan_page_pool:wlan_page_pool",
-    "//vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/build/connac3x/6991_6653:wlan_drv_gen4m_6991_6653",
-    "//vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/build/connac3x/6991_6653_dx5_2g2a_tc10sp:wlan_drv_gen4m_6991_6653_dx5_2g2a_tc10sp",
+    "//vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/build/connac3x/6991_6639_tc10sp:wlan_drv_gen4m_6991_6639_tc10sp",
+    "//vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m_mt6653/build/connac3x/6991_6653:wlan_drv_gen4m_6991_6653",
     "//vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m_s1/build/connac1x/6768:wlan_drv_gen4m_6768",
     "//vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m_s1/build/connac1x/6833:wlan_drv_gen4m_6833",
     "//vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m_s1/build/connac2x/6877:wlan_drv_gen4m_6877",
@@ -181,6 +183,7 @@ mtk_device_modules = [
     "drivers/gpu/drm/panel/panel-alpha-jdi-nt36672e-vdo-60hz.ko",
     "drivers/gpu/drm/panel/panel-alpha-nt37706-vdo-120hz.ko",
 	"drivers/gpu/drm/panel/panel-ana38407-wqxga-plus-dphy-cmd.ko",
+    "drivers/gpu/drm/panel/panel-ana38407-wqxga-dphy-cmd.ko",
     "drivers/gpu/drm/panel/panel-boe-jd9365da-vdo.ko",
     "drivers/gpu/drm/panel/panel-hx-nt37701-dphy-cmd.ko",
     "drivers/gpu/drm/panel/panel-hx-nt37701-dphy-cmd-120hz.ko",
@@ -280,6 +283,7 @@ mtk_device_modules = [
     "drivers/input/touchscreen/gt9895_brl/gt9895_brl.ko",
     "drivers/input/touchscreen/synaptics_tcm2_sec/synaptics_tcm2_sec.ko",
 	"drivers/input/touchscreen/GT6936/gt6936.ko",
+    "drivers/input/touchscreen/FST1BA90A/fst1ba90a.ko",
     "drivers/interconnect/mediatek/mmqos-common.ko",
     "drivers/interconnect/mediatek/mtk-emi.ko",
     "drivers/interconnect/mediatek/mtk-emibus-icc.ko",
@@ -1182,6 +1186,9 @@ def get_overlay_modules_list():
         mgk_64_common_user_modules.append("drivers/pps/clients/pps-gpio.ko")
 
     if "mt6877_overlay.config" in DEFCONFIG_OVERLAYS:
+        mgk_64_kleaf_modules.remove("//vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/build/connac3x/6991_6639_tc10sp:wlan_drv_gen4m_6991_6639_tc10sp")
+        mgk_64_kleaf_modules.remove("//vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m_s1/build/connac1x/6768:wlan_drv_gen4m_6768")
+        mgk_64_kleaf_modules.remove("//vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m_s1/build/connac1x/6833:wlan_drv_gen4m_6833")
         mgk_64_kleaf_modules.remove("//vendor/mediatek/kernel_modules/gpu:gpu")
         mgk_64_kleaf_modules.append("//vendor/mediatek/kernel_modules/gpu:gpu_mt6877")
         mgk_64_kleaf_modules.remove("//vendor/mediatek/kernel_modules/mtkcam/sched:c2ps")
@@ -1629,6 +1636,9 @@ def get_overlay_modules_list():
         mgk_64_device_modules.append("drivers/misc/mediatek/conn_md/conn_md_drv.ko")
 
     if "mt6768_overlay.config" in DEFCONFIG_OVERLAYS:
+        mgk_64_kleaf_modules.remove("//vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/build/connac3x/6991_6639_tc10sp:wlan_drv_gen4m_6991_6639_tc10sp")
+        mgk_64_kleaf_modules.remove("//vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m_s1/build/connac2x/6877:wlan_drv_gen4m_6877")
+        mgk_64_kleaf_modules.remove("//vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m_s1/build/connac1x/6833:wlan_drv_gen4m_6833")
         mgk_64_kleaf_modules.remove("//vendor/mediatek/kernel_modules/gpu:gpu")
         mgk_64_kleaf_modules.append("//vendor/mediatek/kernel_modules/gpu:gpu_mt6768")
         mgk_64_kleaf_modules.remove("//vendor/mediatek/kernel_modules/mtkcam/mtk-aie:mtk-aie")
@@ -3168,6 +3178,9 @@ def get_overlay_modules_list():
         mgk_64_device_modules.append("drivers/mmc/host/mtk-mmc-swcqhci.ko")
 
     if "mt6833_overlay.config" in DEFCONFIG_OVERLAYS:
+        mgk_64_kleaf_modules.remove("//vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/build/connac3x/6991_6639_tc10sp:wlan_drv_gen4m_6991_6639_tc10sp")
+        mgk_64_kleaf_modules.remove("//vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m_s1/build/connac1x/6768:wlan_drv_gen4m_6768")
+        mgk_64_kleaf_modules.remove("//vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m_s1/build/connac2x/6877:wlan_drv_gen4m_6877")
         mgk_64_kleaf_modules.remove("//vendor/mediatek/kernel_modules/gpu:gpu")
         mgk_64_kleaf_modules.append("//vendor/mediatek/kernel_modules/gpu:gpu_mt6833")
         mgk_64_kleaf_modules.remove("//vendor/mediatek/kernel_modules/mtkcam/sched:c2ps")
@@ -4218,6 +4231,8 @@ def get_overlay_modules_list():
         mgk_64_device_modules.append("drivers/tee/tzdev/4/tzdev.ko")
         mgk_64_device_modules.append("drivers/misc/mediatek/tui/tuihw.ko")
         mgk_64_device_modules.append("drivers/misc/mediatek/tui/tuihw-inf.ko")
+        mgk_64_device_eng_modules.remove("drivers/misc/mediatek/mtprof/irq_monitor.ko")
+        mgk_64_device_userdebug_modules.remove("drivers/misc/mediatek/mtprof/irq_monitor.ko")
 
     if "mt6991_teegris_6_overlay.config" in DEFCONFIG_OVERLAYS:
         mgk_64_device_modules.remove("drivers/misc/mediatek/trusted_mem/ffa_v11.ko")
@@ -4229,8 +4244,59 @@ def get_overlay_modules_list():
 #        mgk_64_device_modules.append("drivers/misc/mediatek/trusted_mem/trusted_mem.ko")
         mgk_64_device_modules.remove("drivers/tee/gud/610/TlcTui/t-base-tui.ko")
         mgk_64_device_modules.append("drivers/tee/tzdev/6/tzdev.ko")
+        mgk_64_device_modules.append("drivers/misc/mediatek/tui/tuihw.ko")
+        mgk_64_device_modules.append("drivers/misc/mediatek/tui/tuihw-inf.ko")
         mgk_64_common_eng_modules.remove("drivers/firmware/arm_ffa/ffa-module.ko")
         mgk_64_common_userdebug_modules.remove("drivers/firmware/arm_ffa/ffa-module.ko")
         mgk_64_common_user_modules.remove("drivers/firmware/arm_ffa/ffa-module.ko")
+
+    if "mt6991_disable_mtk_charger_overlay.config" in DEFCONFIG_OVERLAYS:
+        mgk_64_device_modules.remove("drivers/misc/mediatek/typec/tcpc/tcpc_mt6360.ko")
+        mgk_64_device_modules.remove("drivers/power/supply/adapter_class.ko")
+        mgk_64_device_modules.remove("drivers/power/supply/charger_class.ko")
+        mgk_64_device_modules.remove("drivers/power/supply/mt6370-charger.ko")
+        mgk_64_device_modules.remove("drivers/power/supply/mt6375-charger.ko")
+        mgk_64_device_modules.remove("drivers/power/supply/mt6379-chg.ko")
+        mgk_64_device_modules.remove("drivers/power/supply/ufcs/ufcs_class.ko")
+        mgk_64_device_modules.remove("drivers/power/supply/ufcs/ufcs_mt6379.ko")
+        mgk_64_device_modules.remove("drivers/power/supply/mtk_ufcs_adapter.ko")
+        mgk_64_device_modules.remove("drivers/power/supply/mtk_2p_charger.ko")
+        mgk_64_device_modules.remove("drivers/power/supply/mtk_charger_algorithm_class.ko")
+        mgk_64_device_modules.remove("drivers/power/supply/mtk_charger_framework.ko")
+        mgk_64_device_modules.remove("drivers/power/supply/mtk_hvbpc.ko")
+        mgk_64_device_modules.remove("drivers/power/supply/mtk_pd_adapter.ko")
+        mgk_64_device_modules.remove("drivers/power/supply/mtk_pd_charging.ko")
+        mgk_64_device_modules.remove("drivers/power/supply/mtk_pep.ko")
+        mgk_64_device_modules.remove("drivers/power/supply/mtk_pep20.ko")
+        mgk_64_device_modules.remove("drivers/power/supply/mtk_pep40.ko")
+        mgk_64_device_modules.remove("drivers/power/supply/mtk_pep45.ko")
+        mgk_64_device_modules.remove("drivers/power/supply/mtk_pep50.ko")
+        mgk_64_device_modules.remove("drivers/power/supply/mtk_pep50p.ko")
+        mgk_64_device_modules.remove("drivers/power/supply/rt9490-charger.ko")
+        mgk_64_device_modules.remove("drivers/power/supply/rt9758-charger.ko")
+        mgk_64_device_modules.remove("drivers/power/supply/rt9759.ko")
+        mgk_64_device_modules.remove("drivers/thermal/mediatek/charger_cooling.ko")
+
+    if "mt6991_sm5714_for_ged_overlay.config" in DEFCONFIG_OVERLAYS:
+        mgk_64_device_modules.append("drivers/misc/mediatek/ssdev_in_mtk/samsung/mod-sec-class.ko")
+        mgk_64_device_modules.append("drivers/misc/mediatek/ssdev_in_mtk/typec/sm/sm5714/mod-sm5714-typec.ko")
+        mgk_64_device_modules.append("drivers/misc/mediatek/ssdev_in_mtk/battery/fuelgauge/s2mu106/mod-s2mu106-fuelgauge.ko")
+        mgk_64_device_modules.append("drivers/misc/mediatek/ssdev_in_mtk/battery/fuelgauge/sm5714/mod-sm5714-fuelgauge.ko")
+        mgk_64_device_modules.append("drivers/misc/mediatek/ssdev_in_mtk/battery/common/mod-battery-notifier.ko")
+        mgk_64_device_modules.append("drivers/misc/mediatek/ssdev_in_mtk/muic/mod-core-muic.ko")
+        mgk_64_device_modules.append("drivers/misc/mediatek/ssdev_in_mtk/muic/mod-muic-notifier.ko")
+        mgk_64_device_modules.append("drivers/misc/mediatek/ssdev_in_mtk/typec/common/mod-pdic-notifier.ko")
+        mgk_64_device_modules.append("drivers/misc/mediatek/ssdev_in_mtk/samsung/misc/mod-vbus_notifier.ko")
+        mgk_64_device_modules.append("drivers/misc/mediatek/ssdev_in_mtk/typec/manager/mod-usb-typec-manager-notifier.ko")
+        mgk_64_device_modules.append("drivers/misc/mediatek/ssdev_in_mtk/mfd/slsi/s2mu106/mod-s2mu106-core.ko")
+        mgk_64_device_modules.append("drivers/misc/mediatek/ssdev_in_mtk/battery/charger/s2mu106/mod-s2mu106-charger.ko")
+        mgk_64_device_modules.append("drivers/misc/mediatek/ssdev_in_mtk/muic/mod-s2mu106-muic.ko")
+        mgk_64_device_modules.append("drivers/misc/mediatek/ssdev_in_mtk/battery/charger/s2mu106/mod-s2mu106-pmeter.ko")
+        mgk_64_device_modules.append("drivers/misc/mediatek/ssdev_in_mtk/battery/charger/sm5714/mod-sm5714-charger.ko")
+        mgk_64_device_modules.append("drivers/misc/mediatek/ssdev_in_mtk/mfd/sm/sm5714/mod-sm5714-mfd.ko")
+        mgk_64_device_modules.append("drivers/misc/mediatek/ssdev_in_mtk/muic/mod-sm5714-muic.ko")
+        mgk_64_device_modules.append("drivers/misc/mediatek/ssdev_in_mtk/battery/common/mod-sec-pd.ko")
+        mgk_64_device_modules.append("drivers/misc/mediatek/ssdev_in_mtk/samsung/misc/mod-sec_batt.ko")
+        mgk_64_device_modules.append("drivers/misc/mediatek/ssdev_in_mtk/battery/common/mod-sec-battery.ko")
 
 get_overlay_modules_list()

@@ -283,7 +283,7 @@ void *mtk_vcu_get_sec_handle(struct mtk_vcu_queue *vcu_queue,
 	}
 
 	vcu_sec_handle = &vcu_queue->sec_handles[handles];
-	dma_heap = dma_heap_find("mtk_wfd_region");
+	dma_heap = dma_heap_find("mtk_wfd_region-aligned");
 	if (!dma_heap) {
 		pr_info("[%s] dma heap find fail\n", __func__);
 		mutex_unlock(&vcu_queue->mmap_lock);

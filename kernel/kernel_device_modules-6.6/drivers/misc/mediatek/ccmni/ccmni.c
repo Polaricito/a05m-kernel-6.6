@@ -1248,7 +1248,7 @@ const struct header_ops ccmni_eth_header_ops ____cacheline_aligned = {
 };
 #endif
 
-static u32 ccmni_get_capability_from_dts_node(unsigned int hw_type)
+static int ccmni_get_capability_from_dts_node(unsigned int hw_type)
 {
 	u32 capability = 0;
 	struct device_node *node = NULL;
@@ -1279,7 +1279,7 @@ static u32 ccmni_get_capability_from_dts_node(unsigned int hw_type)
 	return -1;
 }
 
-static u32 ccmni_get_capability_from_dts(void)
+static int ccmni_get_capability_from_dts(void)
 {
 	struct device_node *node = NULL;
 	unsigned int hw_type = 0;
@@ -1306,7 +1306,7 @@ static int ccmni_init(void)
 	struct ccmni_instance *ccmni = NULL;
 	struct net_device *dev = NULL;
 	unsigned long long time_total = sched_clock();
-	u32 capability;
+	int capability;
 
 	capability = ccmni_get_capability_from_dts();
 	if (capability == -1)

@@ -4,6 +4,7 @@
  * Author: Iris-SC Yang <iris-sc.yang@mediatek.com>
  */
 #include <linux/time.h>
+#include <linux/delay.h>
 
 #include <media/v4l2-device.h>
 #include <media/v4l2-mem2mem.h>
@@ -23,6 +24,9 @@ module_param(m2m_max_cache_task, int, 0644);
 
 int m2m_max_cache_cfg = 2;
 module_param(m2m_max_cache_cfg, int, 0644);
+
+int m2m_frame_done_delay_ms;
+module_param(m2m_frame_done_delay_ms, int, 0644);
 
 struct mml_v4l2_dev {
 	struct v4l2_device v4l2_dev;
@@ -80,6 +84,9 @@ struct mml_m2m_ctx {
 	struct mutex q_mutex;
 	struct kref ref;
 	struct completion destroy;	/* ready for destroy */
+
+	atomic_t run_count;
+	struct wait_queue_head run_wq;
 };
 
 static void m2m_ctx_complete(struct kref *ref)
@@ -94,6 +101,8 @@ static void m2m_param_queue(struct mml_m2m_ctx *ctx)
 	struct mml_m2m_param *param;
 
 	param = kzalloc(sizeof(*param), GFP_KERNEL);
+	if (!param)
+		return;
 	*param = ctx->param;
 	mutex_lock(&ctx->param_mutex);
 	list_add_tail(&param->entry, &ctx->params);
@@ -113,26 +122,32 @@ static void m2m_param_remove(struct mml_m2m_ctx *ctx)
 	mutex_unlock(&ctx->param_mutex);
 }
 
-static void mml_m2m_process_done(struct mml_m2m_ctx *mctx, enum vb2_buffer_state vb_state)
+static void m2m_task_submit_done(struct mml_task *task)
 {
-	struct vb2_v4l2_buffer *src_buf, *dst_buf;
+	struct mml_m2m_ctx *mctx = container_of(task->ctx, struct mml_m2m_ctx, ctx);
 	struct mml_v4l2_dev *v4l2_dev = mml_get_v4l2_dev(mctx->ctx.mml);
-
+	u32 jobid = task->job.jobid;
+	/* note that m2m task is not queued to worker so we do not need to get mctx here */
+	mml_trace_ex_begin("%s", __func__);
 	m2m_param_remove(mctx);
 
-	src_buf = v4l2_m2m_src_buf_remove(mctx->m2m_ctx);
-	dst_buf = v4l2_m2m_dst_buf_remove(mctx->m2m_ctx);
-	if (!src_buf ||!dst_buf) {
-		mml_err("[m2m]%s no src or dst buffer found", __func__);
-		return;
-	}
-	src_buf->sequence = mctx->frame_count[MML_M2M_FRAME_SRC]++;
-	dst_buf->sequence = mctx->frame_count[MML_M2M_FRAME_DST]++;
-	v4l2_m2m_buf_copy_metadata(src_buf, dst_buf, true);
-
-	v4l2_m2m_buf_done(src_buf, vb_state);
-	v4l2_m2m_buf_done(dst_buf, vb_state);
 	v4l2_m2m_job_finish(v4l2_dev->m2m_dev, mctx->m2m_ctx);
+	task_submit_done(task);
+	mml_trace_ex_end();
+	mml_mmp(m2m_submit_done, MMPROFILE_FLAG_PULSE, jobid, 0);
+}
+
+static void mml_m2m_process_done(struct mml_task *task, enum vb2_buffer_state vb_state)
+{
+	struct mml_m2m_ctx *mctx = container_of(task->ctx, struct mml_m2m_ctx, ctx);
+
+	v4l2_m2m_buf_done(task->src_buf, vb_state);
+	v4l2_m2m_buf_done(task->dst_buf, vb_state);
+	task->src_buf = NULL;
+	task->dst_buf = NULL;
+	if (atomic_dec_and_test(&mctx->run_count))
+		wake_up_interruptible(&mctx->run_wq);
+	mml_mmp(m2m_process_done, MMPROFILE_FLAG_PULSE, task->job.jobid, 0);
 }
 
 static void m2m_task_frame_done(struct mml_task *task)
@@ -141,7 +156,6 @@ static void m2m_task_frame_done(struct mml_task *task)
 	struct mml_frame_config *tmp;
 	struct mml_ctx *ctx = task->ctx;
 	struct mml_dev *mml = cfg->mml;
-	enum vb2_buffer_state vb_state = VB2_BUF_STATE_DONE;
 	struct mml_m2m_ctx *mctx = container_of(ctx, struct mml_m2m_ctx, ctx);
 
 	mml_trace_ex_begin("%s", __func__);
@@ -164,7 +178,6 @@ static void m2m_task_frame_done(struct mml_task *task)
 			task->state);
 		task->err = true;
 		cfg->err = true;
-		vb_state = VB2_BUF_STATE_ERROR;
 		mml_record_track(mml, task);
 		kref_put(&task->ref, task_move_to_destroy);
 	} else {
@@ -208,10 +221,14 @@ static void m2m_task_frame_done(struct mml_task *task)
 done:
 	mutex_unlock(&ctx->config_mutex);
 
-	/* notice frame done to v4l2 */
-	mml_m2m_process_done(mctx, vb_state);
+	if (unlikely(m2m_frame_done_delay_ms)) {
+		mml_msg("[m2m] before frame done delay %dms on ctx %p",
+			m2m_frame_done_delay_ms, mctx);
+		msleep_interruptible(m2m_frame_done_delay_ms);
+	}
 
 	/* kref_get mctx->ref in mml_m2m_device_run */
+	mml_msg("[m2m]%s put ctx %p", __func__, mctx);
 	kref_put(&mctx->ref, m2m_ctx_complete);
 
 	mml_lock_wake_lock(mml, false);
@@ -219,9 +236,25 @@ done:
 	mml_trace_ex_end();
 }
 
+static void m2m_task_signal_irq(struct mml_task *task)
+{
+	enum vb2_buffer_state vb_state = VB2_BUF_STATE_DONE;
+
+	mml_msg("[m2m]%s signal user done job id %u", __func__, task->job.jobid);
+
+	mml_trace_ex_begin("%s_%u", __func__, task->job.jobid);
+	if (unlikely(!task->pkts[0] || (task->config->dual && !task->pkts[1])))
+		vb_state = VB2_BUF_STATE_ERROR;
+	/* notice buffer done to v4l2 */
+	mml_m2m_process_done(task, vb_state);
+	mml_trace_ex_end();
+	mml_mmp(m2m_sig, MMPROFILE_FLAG_PULSE, task->job.jobid, 0);
+}
+
 static const struct mml_task_ops m2m_task_ops = {
-	.submit_done = task_submit_done,
+	.submit_done = m2m_task_submit_done,
 	.frame_done = m2m_task_frame_done,
+	.signal_irq = m2m_task_signal_irq,
 	.dup_task = task_dup,
 	.get_tile_cache = task_get_tile_cache,
 };
@@ -374,10 +407,10 @@ static int mml_check_scaling_ratio(const struct mml_rect *crop,
 		comp_h = compose->height;
 	}
 
-	if ((crop_w / comp_w) > limit->h_scale_down_max ||
-	    (crop_h / comp_h) > limit->v_scale_down_max ||
-	    (comp_w / crop_w) > limit->h_scale_up_max ||
-	    (comp_h / crop_h) > limit->v_scale_up_max)
+	if (crop_w > comp_w * limit->h_scale_down_max ||
+	    crop_h > comp_h * limit->v_scale_down_max ||
+	    comp_w > crop_w * limit->h_scale_up_max ||
+	    comp_h > crop_h * limit->v_scale_up_max)
 		return -ERANGE;
 	return 0;
 }
@@ -398,9 +431,9 @@ static int mml_m2m_start_streaming(struct vb2_queue *q, unsigned int count)
 	out_streaming = vb2_is_streaming(v4l2_m2m_get_src_vq(ctx->m2m_ctx));
 	cap_streaming = vb2_is_streaming(v4l2_m2m_get_dst_vq(ctx->m2m_ctx));
 
-	/* Check to see if scaling ratio is within supported range */
 	if ((V4L2_TYPE_IS_OUTPUT(q->type) && cap_streaming) ||
 	    (V4L2_TYPE_IS_CAPTURE(q->type) && out_streaming)) {
+		/* Check to see if scaling ratio is within supported range */
 		ret = mml_check_scaling_ratio(&dest->crop.r,
 					      &dest->compose,
 					      ctx->param.rotation,
@@ -411,6 +444,7 @@ static int mml_m2m_start_streaming(struct vb2_queue *q, unsigned int count)
 				dest->compose.width, dest->compose.height);
 			return ret;
 		}
+		atomic_set(&ctx->run_count, 0);
 	}
 
 	return 0;
@@ -441,6 +475,8 @@ static void mml_m2m_stop_streaming(struct vb2_queue *q)
 		v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_ERROR);
 		vbuf = mml_m2m_buf_remove(ctx, q->type);
 	}
+
+	wait_event_interruptible(ctx->run_wq, !atomic_read(&ctx->run_count));
 }
 
 static int mml_m2m_queue_setup(struct vb2_queue *q, unsigned int *num_buffers,
@@ -1388,7 +1424,23 @@ static int mml_m2m_s_selection(struct file *file, void *fh,
 	dest = ctx_get_submit_dest(ctx, 0);
 
 	if (m2m_target_is_crop(s->target)) {
-		v4l2_rect_to_mml_rect(&r, &dest->crop.r);
+		struct mml_rect crop;
+
+		v4l2_rect_to_mml_rect(&r, &crop);
+		if (vb2_is_streaming(v4l2_m2m_get_dst_vq(ctx->m2m_ctx))) {
+			/* Check to see if scaling ratio is within supported range */
+			ret = mml_check_scaling_ratio(&crop,
+						      &dest->compose,
+						      ctx->param.rotation,
+						      ctx->limit);
+			if (ret) {
+				mml_err("[m2m]%s out of scaling range crop(%u,%u) compose(%u,%u)",
+					__func__, r.width, r.height,
+					dest->compose.width, dest->compose.height);
+				return ret;
+			}
+		}
+		dest->crop.r = crop;
 	} else {
 		v4l2_rect_to_mml_rect(&r, &dest->compose);
 		dest->data.width = r.width;
@@ -1460,6 +1512,7 @@ static struct mml_m2m_ctx *m2m_ctx_create(struct mml_dev *mml)
 	mutex_init(&ctx->q_mutex);
 	kref_init(&ctx->ref);
 	init_completion(&ctx->destroy);
+	init_waitqueue_head(&ctx->run_wq);
 
 	return ctx;
 }
@@ -1603,6 +1656,7 @@ static int mml_m2m_release(struct file *file)
 		v4l2_fh_exit(&ctx->fh);
 		mutex_unlock(&v4l2_dev->m2m_mutex);
 
+		mml_msg("[m2m]%s put ctx %p", __func__, ctx);
 		kref_put(&ctx->ref, m2m_ctx_complete);
 		wait_for_completion(&ctx->destroy);
 		m2m_ctx_destroy(ctx);
@@ -1662,10 +1716,11 @@ static int m2m_set_orientation(struct mml_frame_dest *dest,
 
 static s32 m2m_set_submit(struct mml_m2m_ctx *mctx, struct mml_submit *submit)
 {
-	int ret = 0;
 	struct device *mmu_dev;
 	struct vb2_queue *src_vq, *dst_vq;
 	struct mml_m2m_param *param;
+	struct mml_frame_dest *dest = &submit->info.dest[0];
+	int ret;
 
 	mutex_lock(&mctx->param_mutex);
 	if (list_empty(&mctx->params)) {
@@ -1676,18 +1731,29 @@ static s32 m2m_set_submit(struct mml_m2m_ctx *mctx, struct mml_submit *submit)
 
 	param = list_first_entry(&mctx->params, struct mml_m2m_param, entry);
 
-	ret = m2m_set_orientation(&submit->info.dest[0],
-		param->rotation, param->hflip, param->vflip);
+	ret = m2m_set_orientation(dest, param->rotation, param->hflip, param->vflip);
 	if (ret < 0)
 		goto unlock_param;
+
+	/* Check to see if scaling ratio is within supported range */
+	ret = mml_check_scaling_ratio(&dest->crop.r,
+				      &dest->compose,
+				      param->rotation,
+				      mctx->limit);
+	if (ret) {
+		mml_err("[m2m]%s out of scaling range crop(%u,%u) compose(%u,%u)",
+			__func__, dest->crop.r.width, dest->crop.r.height,
+			dest->compose.width, dest->compose.height);
+		goto unlock_param;
+	}
 
 	mmu_dev = mml_get_mmu_dev(mctx->ctx.mml, param->secure);
 	submit->info.src.secure = param->secure;
 	src_vq = v4l2_m2m_get_vq(mctx->m2m_ctx, V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE);
 	src_vq->dev = mmu_dev;
 
-	submit->info.dest[0].pq_config = param->pq_submit.pq_config;
-	submit->info.dest[0].data.secure = param->secure;
+	dest->pq_config = param->pq_submit.pq_config;
+	dest->data.secure = param->secure;
 	dst_vq = v4l2_m2m_get_vq(mctx->m2m_ctx, V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE);
 	dst_vq->dev = mmu_dev;
 	submit->info.dest_cnt = 1;
@@ -1779,7 +1845,7 @@ static void mml_m2m_device_run(void *priv)
 	struct mml_ctx *ctx = &mctx->ctx;
 	struct mml_frame_config *cfg;
 	struct mml_task *task = NULL;
-	s32 result;
+	s32 result = 0;
 	u32 i;
 	struct vb2_v4l2_buffer *src_buf, *dst_buf;
 	enum vb2_buffer_state vb_state = VB2_BUF_STATE_ERROR;
@@ -1788,6 +1854,18 @@ static void mml_m2m_device_run(void *priv)
 
 	/* hold mctx to avoid release from v4l2 before call submit_done */
 	kref_get(&mctx->ref);
+	atomic_inc(&mctx->run_count);
+	src_buf = v4l2_m2m_src_buf_remove(mctx->m2m_ctx);
+	dst_buf = v4l2_m2m_dst_buf_remove(mctx->m2m_ctx);
+	if (!src_buf || !dst_buf) {
+		mml_err("[m2m]%s get next buf fail src %p dst %p", __func__,
+			src_buf, dst_buf);
+		goto err_buf_exit;
+	}
+
+	src_buf->sequence = mctx->frame_count[MML_M2M_FRAME_SRC]++;
+	dst_buf->sequence = mctx->frame_count[MML_M2M_FRAME_DST]++;
+	v4l2_m2m_buf_copy_metadata(src_buf, dst_buf, true);
 
 	result = m2m_set_submit(mctx, submit);
 	if (result < 0)
@@ -1876,14 +1954,8 @@ static void mml_m2m_device_run(void *priv)
 
 	/* copy per-frame info */
 	task->ctx = ctx;
-
-	src_buf = v4l2_m2m_next_src_buf(mctx->m2m_ctx);
-	dst_buf = v4l2_m2m_next_dst_buf(mctx->m2m_ctx);
-	if (!src_buf || !dst_buf) {
-		mml_err("[m2m]%s get next buf fail src %p dst %p", __func__,
-			src_buf, dst_buf);
-		goto err_buf_exit;
-	}
+	task->src_buf = src_buf;
+	task->dst_buf = dst_buf;
 
 	task->adaptor_type = MML_ADAPTOR_M2M;
 	/* update endTime here */
@@ -1939,6 +2011,7 @@ static void mml_m2m_device_run(void *priv)
 	}
 
 	/* note that m2m task is not queued to another thread so we can put mctx here */
+	mml_msg("[m2m]%s put ctx %p", __func__, mctx);
 	kref_put(&mctx->ref, m2m_ctx_complete);
 
 	mml_trace_end();
@@ -1948,7 +2021,7 @@ err_unlock_exit:
 	mutex_unlock(&ctx->config_mutex);
 err_buf_exit:
 	mml_trace_end();
-	mml_log("%s fail result %d task %p", __func__, result, task);
+	mml_log("[m2m]%s fail result %d task %p", __func__, result, task);
 	if (task) {
 		bool is_init_state = task->state == MML_TASK_INITIAL;
 
@@ -1958,21 +2031,24 @@ err_buf_exit:
 		cfg->await_task_cnt--;
 
 		if (is_init_state) {
-			mml_log("dec config %p and del", cfg);
+			mml_log("[m2m]dec config %p and del", cfg);
 
 			list_del_init(&cfg->entry);
 			ctx->config_cnt--;
 		} else
-			mml_log("dec config %p", cfg);
+			mml_log("[m2m]dec config %p", cfg);
 
 		mutex_unlock(&ctx->config_mutex);
+
+		mml_m2m_process_done(task, vb_state);
 		kref_put(&task->ref, task_move_to_destroy);
 
 		if (is_init_state)
 			cfg->cfg_ops->put(cfg);
 	}
-	mml_m2m_process_done(mctx, vb_state);
 
+	if (atomic_dec_and_test(&mctx->run_count))
+		wake_up_interruptible(&mctx->run_wq);
 	kref_put(&mctx->ref, m2m_ctx_complete);
 }
 

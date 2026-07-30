@@ -233,6 +233,11 @@ const struct nla_policy mtk_usable_channel_policy[
 	[WIFI_ATTRIBUTE_USABLE_CHANNEL_MAX_SIZE] = {.type = NLA_U32},
 };
 
+const struct nla_policy nla_string_cmd_policy[
+		STRING_ATTRIBUTE_MAX + 1] = {
+	[STRING_ATTRIBUTE_DATA] = { .type = NLA_STRING },
+};
+
 /*******************************************************************************
  *                           P R I V A T E   D A T A
  *******************************************************************************
@@ -532,6 +537,26 @@ int mtk_cfg80211_vendor_set_scan_mac_oui(struct wiphy *wiphy,
 	}
 
 	return 0;
+}
+
+int mtk_cfg80211_vendor_string_cmd(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void *data, int data_len)
+{
+	struct nlattr *attr;
+	char cmd[1024] = {0};
+
+	if ((data == NULL) || !data_len)
+		return -EINVAL;
+
+	attr = (struct nlattr *)data;
+#if KERNEL_VERSION(5, 11, 0) <= LINUX_VERSION_CODE
+	nla_strscpy(cmd, attr, sizeof(cmd));
+#else
+	nla_strlcpy(cmd, attr, sizeof(cmd));
+#endif
+
+	return mtk_cfg80211_process_str_cmd(wiphy, wdev, cmd,
+		(data_len > strlen(cmd)) ? strlen(cmd) : data_len);
 }
 
 int mtk_cfg80211_vendor_set_scan_param(struct wiphy *wiphy,

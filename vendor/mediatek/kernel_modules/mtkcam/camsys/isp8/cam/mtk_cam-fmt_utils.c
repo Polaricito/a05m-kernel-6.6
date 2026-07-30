@@ -225,7 +225,7 @@ int mtk_cam_dma_bus_size(int bpp, int pixel_mode_shift, int is_fg)
 	return bus_size / 8; /* in bytes */
 }
 
-unsigned int mtk_cam_get_pixel_bits(unsigned int ipi_fmt)
+int mtk_cam_get_pixel_bits(unsigned int ipi_fmt)
 {
 	switch (ipi_fmt) {
 	case MTKCAM_IPI_IMG_FMT_BAYER8:

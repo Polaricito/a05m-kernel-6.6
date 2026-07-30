@@ -51,8 +51,8 @@ static inline void count_compact_events(enum vm_event_item item, long delta)
 #include <trace/events/compaction.h>
 #undef CREATE_TRACE_POINTS
 #include <trace/hooks/compaction.h>
+#include <trace/hooks/mm.h>
 
-#undef CREATE_TRACE_POINTS
 #ifndef __GENKSYMS__
 #include <trace/hooks/mm.h>
 #endif
@@ -2206,6 +2206,7 @@ static bool should_proactive_compact_node(pg_data_t *pgdat)
 		return false;
 
 	wmark_high = fragmentation_score_wmark(false);
+	trace_android_vh_proactive_compact_wmark_high(&wmark_high);
 	return fragmentation_score_node(pgdat) > wmark_high;
 }
 
@@ -2255,8 +2256,15 @@ static enum compact_result __compact_finished(struct compact_control *cc)
 		goto out;
 	}
 
-	if (is_via_compact_memory(cc->order))
+	if (is_via_compact_memory(cc->order)) {
+		bool compact_enough = false;
+
+		trace_android_vh_proactive_compact_stop(&compact_enough, cc);
+		if (compact_enough)
+			return COMPACT_SUCCESS;
+
 		return COMPACT_CONTINUE;
+	}
 
 	/*
 	 * Always finish scanning a pageblock to reduce the possibility of
@@ -2271,7 +2279,6 @@ static enum compact_result __compact_finished(struct compact_control *cc)
 	ret = COMPACT_NO_SUITABLE_PAGE;
 	for (order = cc->order; order < NR_PAGE_ORDERS; order++) {
 		struct free_area *area = &cc->zone->free_area[order];
-		bool can_steal;
 
 		/* Job done if page is free of the right migratetype */
 		if (!free_area_empty(area, migratetype))
@@ -2287,8 +2294,7 @@ static enum compact_result __compact_finished(struct compact_control *cc)
 		 * Job done if allocation would steal freepages from
 		 * other migratetype buddy lists.
 		 */
-		if (find_suitable_fallback(area, order, migratetype,
-						true, &can_steal) != -1)
+		if (find_suitable_fallback(area, order, migratetype, true) >= 0)
 			/*
 			 * Movable pages are OK in any pageblock. If we are
 			 * stealing for a non-movable allocation, make sure
@@ -2432,6 +2438,7 @@ compact_zone(struct compact_control *cc, struct capture_control *capc)
 	const bool sync = cc->mode != MIGRATE_ASYNC;
 	bool update_cached;
 	unsigned int nr_succeeded = 0;
+	long vendor_ret;
 
 	/*
 	 * These counters track activities during zone compaction.  Initialize
@@ -2510,6 +2517,7 @@ compact_zone(struct compact_control *cc, struct capture_control *capc)
 		cc->zone->compact_cached_migrate_pfn[0] == cc->zone->compact_cached_migrate_pfn[1];
 
 	trace_mm_compaction_begin(cc, start_pfn, end_pfn, sync);
+	trace_android_vh_mm_compaction_begin(cc, &vendor_ret);
 
 	/* lru_add_drain_all could be expensive with involving other CPUs */
 	lru_add_drain();
@@ -2652,6 +2660,7 @@ out:
 	count_compact_events(COMPACTMIGRATE_SCANNED, cc->total_migrate_scanned);
 	count_compact_events(COMPACTFREE_SCANNED, cc->total_free_scanned);
 
+	trace_android_vh_mm_compaction_end(cc, vendor_ret);
 	trace_mm_compaction_end(cc, start_pfn, end_pfn, sync, ret);
 
 	VM_BUG_ON(!list_empty(&cc->freepages));
@@ -3124,6 +3133,30 @@ void wakeup_kcompactd(pg_data_t *pgdat, int order, int highest_zoneidx)
 	wake_up_interruptible(&pgdat->kcompactd_wait);
 }
 
+static struct cpumask kcompactd_cpumask;
+
+static int __init early_kcompactd_cpumask_param(char *buf)
+{
+	unsigned int res;
+	int ret = kstrtouint(buf, 16, &res);
+	int i;
+
+	if (!ret) {
+		cpumask_clear(&kcompactd_cpumask);
+		for (i = 0; i < nr_cpu_ids; i++)
+			if (res & (1 << i))
+				cpumask_set_cpu(i, &kcompactd_cpumask);
+	}
+	return ret;
+}
+early_param("kcompactd_cpumask", early_kcompactd_cpumask_param);
+
+static inline const struct cpumask *get_kcompactd_cpumask(pg_data_t *pgdat)
+{
+	return !cpumask_empty(&kcompactd_cpumask) ?
+		&kcompactd_cpumask : cpumask_of_node(pgdat->node_id);
+}
+
 /*
  * The background compaction daemon, started as a kernel thread
  * from the init process.
@@ -3135,11 +3168,12 @@ static int kcompactd(void *p)
 	long default_timeout = msecs_to_jiffies(HPAGE_FRAG_CHECK_INTERVAL_MSEC);
 	long timeout = default_timeout;
 
-	const struct cpumask *cpumask = cpumask_of_node(pgdat->node_id);
+	const struct cpumask *cpumask = get_kcompactd_cpumask(pgdat);
 
 	if (!cpumask_empty(cpumask))
 		set_cpus_allowed_ptr(tsk, cpumask);
 
+	current->flags |= PF_KCOMPACTD;
 	set_freezable();
 
 	pgdat->kcompactd_max_order = 0;
@@ -3196,6 +3230,8 @@ static int kcompactd(void *p)
 			pgdat->proactive_compact_trigger = false;
 	}
 
+	current->flags &= ~PF_KCOMPACTD;
+
 	return 0;
 }
 
@@ -3245,7 +3281,7 @@ static int kcompactd_cpu_online(unsigned int cpu)
 		pg_data_t *pgdat = NODE_DATA(nid);
 		const struct cpumask *mask;
 
-		mask = cpumask_of_node(pgdat->node_id);
+		mask = get_kcompactd_cpumask(pgdat);
 
 		if (cpumask_any_and(cpu_online_mask, mask) < nr_cpu_ids)
 			/* One of our CPUs online: restore mask */

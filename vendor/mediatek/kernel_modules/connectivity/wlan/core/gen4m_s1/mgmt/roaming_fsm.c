@@ -156,6 +156,7 @@ void roamingFsmInit(IN struct ADAPTER *prAdapter, IN uint8_t ucBssIndex)
 		prConnSettings->fgIsEnableRoaming;
 	prRoamingFsmInfo->eCurrentState = ROAMING_STATE_IDLE;
 	prRoamingFsmInfo->rRoamingDiscoveryUpdateTime = 0;
+	prRoamingFsmInfo->rRoamingStartTime = 0;
 	prRoamingFsmInfo->fgDrvRoamingAllow = TRUE;
 #if (CFG_TC10_FEATURE == 1)
 	LINK_INITIALIZE(&prRoamingFsmInfo->rCandidateApList);
@@ -439,8 +440,12 @@ void roamingFsmSteps(IN struct ADAPTER *prAdapter,
 	enum ENUM_ROAMING_STATE ePreviousState;
 	u_int8_t fgIsTransition = (u_int8_t) FALSE;
 	u_int32_t u4ScnResultsTimeout = prAdapter->rWifiVar.u4DiscoverTimeout;
+	struct CONNECTION_SETTINGS *prConnSettings;
+	struct AIS_FSM_INFO *prAisFsmInfo;
 
 	prRoamingFsmInfo = aisGetRoamingInfo(prAdapter, ucBssIndex);
+	prConnSettings = aisGetConnSettings(prAdapter, ucBssIndex);
+	prAisFsmInfo = aisGetAisFsmInfo(prAdapter, ucBssIndex);
 	do {
 
 		/* Do entering Next State */
@@ -466,13 +471,18 @@ void roamingFsmSteps(IN struct ADAPTER *prAdapter,
 		 *   to speed up state search.
 		 */
 		case ROAMING_STATE_IDLE:
+			prRoamingFsmInfo->rRoamingStartTime = 0;
 			break;
 		case ROAMING_STATE_DECISION:
 #if CFG_SUPPORT_DRIVER_ROAMING
 			GET_CURRENT_SYSTIME(
 				&prRoamingFsmInfo->rRoamingLastDecisionTime);
 #endif
+			prConnSettings->eConnectionPolicy =
+				CONNECT_BY_SSID_BEST_RSSI;
+			prAisFsmInfo->rJoinReqTime = 0;
 			prRoamingFsmInfo->eReason = ROAMING_REASON_POOR_RCPI;
+			prRoamingFsmInfo->rRoamingStartTime = 0;
 			break;
 
 		case ROAMING_STATE_DISCOVERY: {

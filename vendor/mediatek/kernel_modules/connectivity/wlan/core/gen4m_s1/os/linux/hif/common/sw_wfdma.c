@@ -104,7 +104,7 @@ void halSwWfdmaInit(struct GLUE_INFO *prGlueInfo)
 #if CFG_MTK_ANDROID_EMI
 	if (prSwWfdmaInfo->pucIoremapAddr) {
 		DBGLOG(INIT, ERROR, "prDmad already remap\n");
-		return;
+		goto end;
 	}
 
 	if (!gConEmiPhyBaseFinal) {
@@ -135,6 +135,8 @@ void halSwWfdmaInit(struct GLUE_INFO *prGlueInfo)
 	prSwWfdmaInfo->pucIoremapAddr = pucEmiBaseAddr;
 	prSwWfdmaInfo->prDmad =
 		(struct SW_WFDMAD *)(pucEmiBaseAddr);
+
+end:
 	halSwWfdmaReset(prSwWfdmaInfo);
 #endif /* CFG_MTK_ANDROID_EMI */
 }

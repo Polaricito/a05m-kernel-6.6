@@ -208,6 +208,21 @@ struct mtk_seninf_sof_notify_param {
 void
 mtk_cam_seninf_sof_notify(struct mtk_seninf_sof_notify_param *param);
 
+struct mtk_seninf_frame_done_notify_param {
+	struct v4l2_subdev *sd;
+	unsigned int sof_cnt;
+};
+
+/**
+ * mtk_cam_seninf_frame_done_notify - Notify seninf of frame done event
+ * @param: Pointer to frame done notify parameter structure
+ *
+ * Triggers deferred CDR delay update if needed.
+ */
+void
+mtk_cam_seninf_frame_done_notify(struct mtk_seninf_frame_done_notify_param *param);
+
+
 /**
  * struct mtk_seninf_pad_data_info - data information outputed by pad
  */

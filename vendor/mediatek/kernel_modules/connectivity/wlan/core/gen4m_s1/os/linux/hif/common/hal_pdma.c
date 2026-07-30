@@ -253,12 +253,16 @@ uint32_t halRxWaitResponse(IN struct ADAPTER *prAdapter, IN uint8_t ucPortIdx,
 	uint32_t u4PktLen = 0, u4Time;
 	u_int8_t fgStatus;
 	struct mt66xx_chip_info *prChipInfo;
+	struct BUS_INFO *prBusInfo;
+	struct SW_WFDMA_INFO *prSwWfdmaInfo;
 
 	DEBUGFUNC("nicRxWaitResponse");
 
 	ASSERT(prAdapter);
 	prGlueInfo = prAdapter->prGlueInfo;
 	prChipInfo = prAdapter->chip_info;
+	prBusInfo = prAdapter->chip_info->bus_info;
+	prSwWfdmaInfo = &prBusInfo->rSwWfdmaInfo;
 	ASSERT(prGlueInfo);
 	ASSERT(pucRspBuffer);
 
@@ -280,6 +284,12 @@ uint32_t halRxWaitResponse(IN struct ADAPTER *prAdapter, IN uint8_t ucPortIdx,
 		if (fgStatus) {
 			*pu4Length = u4PktLen;
 			break;
+		}
+
+		if (prSwWfdmaInfo->fgIsEnSwWfdma &&
+				prSwWfdmaInfo->rOps.processDmaDone) {
+			prSwWfdmaInfo->rOps.processDmaDone(
+				prAdapter->prGlueInfo);
 		}
 
 		if (halIsTimeout(u4Time, RX_RESPONSE_TIMEOUT)) {
@@ -611,6 +621,9 @@ void halSetFWOwn(IN struct ADAPTER *prAdapter, IN u_int8_t fgEnableGlobalInt)
 		/* Write sleep mode magic num to dummy reg */
 		if (prBusInfo->setDummyReg)
 			prBusInfo->setDummyReg(prAdapter->prGlueInfo);
+
+		if (prBusInfo->recordWFDMAIdx)
+			prBusInfo->recordWFDMAIdx(prAdapter);
 
 		HAL_LP_OWN_SET(prAdapter, &fgResult);
 

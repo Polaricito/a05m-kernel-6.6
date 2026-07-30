@@ -41,6 +41,9 @@
 #define ESD_CHECK_PERIOD 2000 /* ms */
 #define esd_timer_to_mtk_crtc(x) container_of(x, struct mtk_drm_crtc, esd_timer)
 
+int debug_force_esd;
+module_param(debug_force_esd, int, 0644);
+
 static DEFINE_MUTEX(pinctrl_lock);
 
 /* pinctrl implementation */
@@ -475,6 +478,7 @@ static int mtk_drm_esd_recover(struct drm_crtc *crtc)
 	struct mtk_dsi *dsi = NULL;
 	unsigned int last_backlight;
 	struct mtk_panel_ext *panel_ext;
+	bool skip_refresh = false;
 
 	CRTC_MMP_EVENT_START(index, esd_recovery, 0, 0);
 	if (crtc->state && !crtc->state->active) {
@@ -570,7 +574,9 @@ static int mtk_drm_esd_recover(struct drm_crtc *crtc)
 	CRTC_MMP_MARK(index, esd_recovery, 0, 4);
 
 	mtk_crtc_hw_block_ready(crtc);
-	if (mtk_crtc_is_frame_trigger_mode(crtc)) {
+
+	skip_refresh = mtk_crtc->is_mml || mtk_crtc->is_mml_dl || mtk_crtc->skip_check_trigger;
+	if (mtk_crtc_is_frame_trigger_mode(crtc) && !skip_refresh) {
 		struct cmdq_pkt *cmdq_handle;
 
 		mtk_crtc_pkt_create(&cmdq_handle, &mtk_crtc->base,
@@ -652,16 +658,18 @@ int mtk_drm_esd_testing_process(struct mtk_drm_esd_ctx *esd_ctx, bool need_lock)
 					printk("<GTP>check gcore_tp_esd_fail\n");
 				}
 			}
-			if (!ret){ /* success */
-				// rec_esd = 0;
+			if (!ret && !debug_force_esd) /* success */
 				break;
-			}
+
+			if (debug_force_esd)
+				debug_force_esd = 0;
 
 			DDPPR_ERR("[ESD%u]esd check fail, will do esd recovery. try=%d\n",
 				crtc_idx, i);
 			//rec_esd = 1;
 			mtk_drm_esd_recover(crtc);
 			recovery_flg = 1;
+			mtk_crtc->recovery_flg = true;
 			mtk_drm_trace_end();
 		} while (++i < ESD_TRY_CNT);
 

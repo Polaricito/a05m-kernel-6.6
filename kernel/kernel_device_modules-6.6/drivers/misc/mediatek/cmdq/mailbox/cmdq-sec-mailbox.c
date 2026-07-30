@@ -851,18 +851,15 @@ static s32 cmdq_sec_session_init(struct cmdq_sec_context *context)
 
 #ifdef CMDQ_SECURE_MTEE_SUPPORT
 		if (!is_pkvm_enabled()) {
-			if (!context->mtee_iwc_msg ||
-				!context->mtee_iwc_ex1 || !context->mtee_iwc_ex2) {
-				err = cmdq_sec_mtee_allocate_wsm(&context->mtee,
-					&context->mtee_iwc_msg,
-					sizeof(struct iwcCmdqMessage_t),
-					&context->mtee_iwc_ex1,
-					sizeof(struct iwcCmdqMessageEx_t),
-					&context->mtee_iwc_ex2,
-					sizeof(struct iwcCmdqMessageEx2_t));
-				if (err)
-					break;
-			}
+			err = cmdq_sec_mtee_register_wsm(&context->mtee,
+				&context->mtee_iwc_msg,
+				sizeof(struct iwcCmdqMessage_t),
+				&context->mtee_iwc_ex1,
+				sizeof(struct iwcCmdqMessageEx_t),
+				&context->mtee_iwc_ex2,
+				sizeof(struct iwcCmdqMessageEx2_t));
+			if (err)
+				break;
 		}
 #endif
 		else {
@@ -1444,7 +1441,6 @@ static const struct of_device_id cmdq_sec_of_ids[] = {
 
 void cmdq_sec_mbox_switch_normal(struct cmdq_client *cl)
 {
-#ifdef CMDQ_GP_SUPPORT
 	struct cmdq_sec *cmdq =
 		container_of(cl->chan->mbox, typeof(*cmdq), mbox);
 	struct cmdq_sec_thread *thread =
@@ -1457,13 +1453,13 @@ void cmdq_sec_mbox_switch_normal(struct cmdq_client *cl)
 	mutex_lock(&cmdq->exec_lock);
 	/* TODO : use other CMD_CMDQ_TL for maintenance */
 	cmdq_sec_task_submit(cmdq, NULL, CMD_CMDQ_TL_PATH_RES_RELEASE,
-		thread->idx, NULL, false);
+		thread->idx, NULL, true);
 	mutex_unlock(&cmdq->exec_lock);
 
 	cmdq_log("[OUT] %s: cl:%p cmdq:%p thrd:%p idx:%u\n",
 		__func__, cl, cmdq, thread, thread->idx);
 	cmdq_sec_mbox_disable(cl->chan);
-#endif
+
 }
 EXPORT_SYMBOL(cmdq_sec_mbox_switch_normal);
 

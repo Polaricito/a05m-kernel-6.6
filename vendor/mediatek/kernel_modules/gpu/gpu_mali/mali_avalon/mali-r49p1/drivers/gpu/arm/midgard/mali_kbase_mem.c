@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note
 /*
  *
- * (C) COPYRIGHT 2010-2024 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2010-2025 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -31,7 +31,7 @@
 #if IS_ENABLED(CONFIG_OF)
 #include <linux/of_platform.h>
 #endif
-
+#include <linux/zsmalloc.h>
 #include <mali_kbase_config.h>
 #include <mali_kbase.h>
 #include <mali_kbase_reg_track.h>
@@ -44,6 +44,10 @@
 #include <mmu/mali_kbase_mmu.h>
 #include <mali_kbase_trace_gpu_mem.h>
 #include <linux/version_compat_defs.h>
+
+#if IS_ENABLED(CONFIG_MALI_MEMORY_COMPRESSION)
+#include <csf/mali_kbase_csf_mem_compr.h>
+#endif
 
 #if IS_ENABLED(CONFIG_MALI_MTK_MGMM) || \
 	IS_ENABLED(CONFIG_MALI_MTK_PAGE_TABLE_CLUSTERING)
@@ -683,6 +687,15 @@ int kbase_gpu_munmap(struct kbase_context *kctx, struct kbase_va_region *reg)
 	}
 	default: {
 		size_t nr_reg_pages = kbase_reg_current_backed_size(reg);
+		/* check for native mem which have been compressed
+		 * which already be teardown so don't need do it again
+		 */
+		if (reg->gpu_alloc->compressed_nents > 0) {
+			dev_dbg(kctx->kbdev->dev,
+					"ignore teardown pages VA %llx (%lu %lu) for compressed region",
+					reg->start_pfn, reg->gpu_alloc->compressed_nents, reg->gpu_alloc->nents);
+			break;
+		}
 
 		err = kbase_mmu_teardown_pages(kctx->kbdev, &kctx->mmu, reg->start_pfn,
 					       alloc->pages, nr_reg_pages, nr_reg_pages,
@@ -1521,6 +1534,7 @@ int kbase_alloc_phy_pages_helper(struct kbase_mem_phy_alloc *alloc, size_t nr_pa
 				INIT_LIST_HEAD(&sa->link);
 				bitmap_zero(sa->sub_pages, NUM_PAGES_IN_2MB_LARGE_PAGE);
 				sa->page = np;
+				sa->group_id = alloc->group_id;
 
 #if IS_ENABLED(CONFIG_MALI_MTK_PAGE_TABLE_CLUSTERING)
 				for (i = 0; i < nr_left; i++) {
@@ -1645,6 +1659,7 @@ static size_t free_partial_locked(struct kbase_context *kctx, struct kbase_mem_p
 	struct page *p, *head_page;
 	struct kbase_sub_alloc *sa;
 	size_t nr_pages_to_account = 0;
+	struct kbase_mem_pool *temp_pool;
 
 	lockdep_assert_held(&pool->pool_lock);
 	lockdep_assert_held(&kctx->mem_partials_lock);
@@ -1659,7 +1674,16 @@ static size_t free_partial_locked(struct kbase_context *kctx, struct kbase_mem_p
 	}
 	if (bitmap_empty(sa->sub_pages, NUM_PAGES_IN_2MB_LARGE_PAGE)) {
 		list_del(&sa->link);
-		kbase_mem_pool_free_locked(pool, head_page, false);
+
+		if (pool->group_id != sa->group_id) {
+			temp_pool = &kctx->mem_pools.large[sa->group_id];
+			kbase_mem_pool_lock(temp_pool);
+			kbase_mem_pool_free_locked(temp_pool, head_page, false);
+			kbase_mem_pool_unlock(temp_pool);
+		} else {
+			kbase_mem_pool_free_locked(pool, head_page, false);
+		}
+
 		kfree(sa);
 		nr_pages_to_account = NUM_PAGES_IN_2MB_LARGE_PAGE;
 	} else if (bitmap_weight(sa->sub_pages, NUM_PAGES_IN_2MB_LARGE_PAGE) ==
@@ -1856,6 +1880,7 @@ struct tagged_addr *kbase_alloc_phy_pages_helper_locked(struct kbase_mem_phy_all
 				INIT_LIST_HEAD(&sa->link);
 				bitmap_zero(sa->sub_pages, NUM_PAGES_IN_2MB_LARGE_PAGE);
 				sa->page = np;
+				sa->group_id = pool->group_id;
 
 #if IS_ENABLED(CONFIG_MALI_MTK_PAGE_TABLE_CLUSTERING)
 				for (i = 0; i < nr_left; i++) {
@@ -1975,8 +2000,7 @@ invalid_request:
 	return NULL;
 }
 
-static size_t free_partial(struct kbase_context *kctx, int group_id, struct tagged_addr tp,
-			   bool syncback)
+static size_t free_partial(struct kbase_context *kctx, struct tagged_addr tp, bool syncback)
 {
 	struct page *p, *head_page;
 	struct kbase_sub_alloc *sa;
@@ -1992,8 +2016,12 @@ static size_t free_partial(struct kbase_context *kctx, int group_id, struct tagg
 	spin_lock(&kctx->mem_partials_lock);
 	clear_bit(p - head_page, sa->sub_pages);
 	if (bitmap_empty(sa->sub_pages, NUM_PAGES_IN_2MB_LARGE_PAGE)) {
+		struct kbase_mem_pool *pool = &kctx->mem_pools.large[sa->group_id];
+
 		list_del(&sa->link);
-		kbase_mem_pool_free(&kctx->mem_pools.large[group_id], head_page, false);
+		kbase_mem_pool_lock(pool);
+		kbase_mem_pool_free_locked(pool, head_page, false);
+		kbase_mem_pool_unlock(pool);
 		kfree(sa);
 		nr_pages_to_account = NUM_PAGES_IN_2MB_LARGE_PAGE;
 	} else if (bitmap_weight(sa->sub_pages, NUM_PAGES_IN_2MB_LARGE_PAGE) ==
@@ -2021,7 +2049,13 @@ int kbase_free_phy_pages_helper(struct kbase_mem_phy_alloc *alloc, size_t nr_pag
 	 * to satisfy the memory allocation request.
 	 */
 	size_t nr_pages_to_account = 0;
+#if MALI_USE_CSF && IS_ENABLED(CONFIG_MALI_MEMORY_COMPRESSION)
+	unsigned long old_compressed_mem_size = 0;
+	size_t freed_compressed = 0;
 
+	if (IS_ENABLED(CONFIG_ZSMALLOC) && alloc->compressed_nents)
+		old_compressed_mem_size = zs_get_total_pages(kctx->csf.zs_pool);
+#endif
 	if (WARN_ON(alloc->type != KBASE_MEM_TYPE_NATIVE) ||
 	    WARN_ON(alloc->imported.native.kctx == NULL) ||
 	    WARN_ON(alloc->nents < nr_pages_to_free) ||
@@ -2038,7 +2072,9 @@ int kbase_free_phy_pages_helper(struct kbase_mem_phy_alloc *alloc, size_t nr_pag
 	syncback = alloc->properties & KBASE_MEM_PHY_ALLOC_ACCESSED_CACHED;
 
 	/* pad start_free to a valid start location */
-	while (nr_pages_to_free && is_huge(*start_free) && !is_huge_head(*start_free)) {
+	while (nr_pages_to_free &&
+	       ((is_huge(*start_free) && !is_huge_head(*start_free)) ||
+		(is_compressed_large(*start_free) && !is_compressed_large_head(*start_free)))) {
 		nr_pages_to_free--;
 		start_free++;
 	}
@@ -2057,16 +2093,28 @@ int kbase_free_phy_pages_helper(struct kbase_mem_phy_alloc *alloc, size_t nr_pag
 			nr_pages_to_account += NUM_PAGES_IN_2MB_LARGE_PAGE;
 		} else if (is_partial(*start_free)) {
 			nr_pages_to_account +=
-				free_partial(kctx, alloc->group_id, *start_free, syncback);
+				free_partial(kctx, *start_free, syncback);
 			nr_pages_to_free--;
 			start_free++;
 			freed++;
+#if IS_ENABLED(CONFIG_MALI_MEMORY_COMPRESSION)
+		} else if (is_compressed_large_head(*start_free)) {
+			kbase_zs_free_compressed_page(kctx, start_free);
+			nr_pages_to_free -= NUM_PAGES_IN_2MB_LARGE_PAGE;
+			start_free += NUM_PAGES_IN_2MB_LARGE_PAGE;
+			freed_compressed += NUM_PAGES_IN_2MB_LARGE_PAGE;
+		} else if (is_compressed_small(*start_free)) {
+			kbase_zs_free_compressed_page(kctx, start_free);
+			nr_pages_to_free--;
+			start_free++;
+			freed_compressed++;
+#endif
 		} else {
 			struct tagged_addr *local_end_free;
 
 			local_end_free = start_free;
 			while (nr_pages_to_free && !is_huge(*local_end_free) &&
-			       !is_partial(*local_end_free)) {
+			       !is_partial(*local_end_free) && !is_compressed(*local_end_free)) {
 				local_end_free++;
 				nr_pages_to_free--;
 			}
@@ -2080,7 +2128,16 @@ int kbase_free_phy_pages_helper(struct kbase_mem_phy_alloc *alloc, size_t nr_pag
 	}
 
 	alloc->nents -= freed;
+#if MALI_USE_CSF && IS_ENABLED(CONFIG_MALI_MEMORY_COMPRESSION)
+	if (IS_ENABLED(CONFIG_ZSMALLOC) && freed_compressed) {
+		unsigned long compressed_mem_dec =
+			old_compressed_mem_size - zs_get_total_pages(kctx->csf.zs_pool);
 
+		kbase_process_page_usage_dec(kctx, compressed_mem_dec);
+		alloc->compressed_nents -= freed_compressed;
+		alloc->nents -= freed_compressed;
+	}
+#endif
 	if (!reclaimed) {
 		/* If the allocation was not reclaimed then all freed pages
 		 * need to be accounted.
@@ -2234,6 +2291,7 @@ void kbase_mem_kref_free(struct kref *kref)
 						     alloc->imported.native.nr_struct_pages);
 		}
 		kbase_free_phy_pages_helper(alloc, alloc->nents);
+		WARN_ON_ONCE(alloc->compressed_nents);
 		break;
 	}
 	case KBASE_MEM_TYPE_ALIAS: {
@@ -2270,7 +2328,14 @@ void kbase_mem_kref_free(struct kref *kref)
 #endif
 			kbase_remove_dma_buf_usage(alloc->imported.umm.kctx, alloc);
 		}
-
+#if MALI_USE_CSF
+		/* Check if delegation of free is required. On true, return directly. The
+		 * alloc will be freed by the deferral-control later when the deferral end
+		 * condition is satisfied.
+		 */
+		if (kbase_csf_scheduler_delegate_imported_buf_alloc_free(alloc))
+			return;
+#endif
 		dma_buf_detach(alloc->imported.umm.dma_buf, alloc->imported.umm.dma_attachment);
 		dma_buf_put(alloc->imported.umm.dma_buf);
 		break;
@@ -2279,6 +2344,14 @@ void kbase_mem_kref_free(struct kref *kref)
 		case KBASE_USER_BUF_STATE_PINNED:
 		case KBASE_USER_BUF_STATE_DMA_MAPPED:
 		case KBASE_USER_BUF_STATE_GPU_MAPPED: {
+#if MALI_USE_CSF
+			/* Check if delegation of free is required. On true, return directly. The
+			 * alloc will be freed by the deferral-control later when the deferral end
+			 * condition is satisfied.
+			 */
+			if (kbase_csf_scheduler_delegate_imported_buf_alloc_free(alloc))
+				return;
+#endif
 			/* It's too late to undo all of the operations that might have been
 			 * done on an imported USER_BUFFER handle, as references have been
 			 * lost already.
@@ -3777,7 +3850,7 @@ void kbase_jit_free(struct kbase_context *kctx, struct kbase_va_region *reg)
 	WARN_ON(!list_empty(&reg->gpu_alloc->evict_node));
 	list_add(&reg->gpu_alloc->evict_node, &kctx->evict_list);
 	atomic_add(reg->gpu_alloc->nents, &kctx->evict_nents);
-
+	atomic_add(reg->gpu_alloc->compressed_nents, &kctx->evict_compressed_nents);
 	list_move(&reg->jit_node, &kctx->jit_pool_head);
 
 #if IS_ENABLED(CONFIG_MALI_MTK_JIT_RECLAIM_ANTITHRASHING)

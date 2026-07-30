@@ -12,12 +12,16 @@
 #include <linux/tracepoint.h>
 
 TRACE_EVENT(sched_runnable_boost,
-	TP_PROTO(bool is_runnable_boost_enable, int boost, unsigned long rq_util_avg,
-		unsigned long rq_util_est, unsigned long rq_load, unsigned long cpu_util_next),
-	TP_ARGS(is_runnable_boost_enable, boost, rq_util_avg, rq_util_est, rq_load, cpu_util_next),
+	TP_PROTO(bool is_runnable_boost_enable, int boost, bool runnable_boost_all_cpus,
+		bool cpu_in_cpumask,unsigned long rq_util_avg, unsigned long rq_util_est,
+		unsigned long rq_load, unsigned long cpu_util_next),
+	TP_ARGS(is_runnable_boost_enable, boost, runnable_boost_all_cpus, cpu_in_cpumask, rq_util_avg,
+		rq_util_est, rq_load, cpu_util_next),
 	TP_STRUCT__entry(
 		__field(bool, is_runnable_boost_enable)
 		__field(int, boost)
+		__field(int, runnable_boost_all_cpus)
+		__field(int, cpu_in_cpumask)
 		__field(unsigned long, rq_util_avg)
 		__field(unsigned long, rq_util_est)
 		__field(unsigned long, rq_load)
@@ -26,14 +30,18 @@ TRACE_EVENT(sched_runnable_boost,
 	TP_fast_assign(
 		__entry->is_runnable_boost_enable = is_runnable_boost_enable;
 		__entry->boost = boost;
+		__entry->runnable_boost_all_cpus = runnable_boost_all_cpus;
+		__entry->cpu_in_cpumask = cpu_in_cpumask;
 		__entry->rq_util_avg = rq_util_avg;
 		__entry->rq_util_est = rq_util_est;
 		__entry->rq_load = rq_load;
 		__entry->cpu_util_next = cpu_util_next;
 	),
-	TP_printk("is_runnable_boost_enable=%d boost=%d rq_util_avg=%lu rq_util_est=%lu rq_load=%lu cpu_util_next=%lu",
+	TP_printk("is_runnable_boost_enable=%d boost=%d runnable_boost_all_cpus=%d cpu_in_cpumask=%d rq_util_avg=%lu rq_util_est=%lu rq_load=%lu cpu_util_next=%lu",
 		__entry->is_runnable_boost_enable,
 		__entry->boost,
+		__entry->runnable_boost_all_cpus,
+		__entry->cpu_in_cpumask,
 		__entry->rq_util_avg,
 		__entry->rq_util_est,
 		__entry->rq_load,

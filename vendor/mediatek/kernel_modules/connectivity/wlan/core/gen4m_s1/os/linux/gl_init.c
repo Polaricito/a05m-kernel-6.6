@@ -1322,6 +1322,21 @@ static const struct wiphy_vendor_command
 #endif
 	},
 #endif /* CFG_SUPPORT_USABLE_CHANNEL */
+	{
+		{
+			.vendor_id = OUI_MTK,
+			.subcmd = MTK_SUBCMD_STRING_CMD
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
+				WIPHY_VENDOR_CMD_NEED_NETDEV |
+				WIPHY_VENDOR_CMD_NEED_RUNNING,
+		.doit = mtk_cfg80211_vendor_string_cmd
+#if KERNEL_VERSION(5, 4, 0) <= CFG80211_VERSION_CODE
+		,
+		.policy = nla_string_cmd_policy,
+		.maxattr = STRING_ATTRIBUTE_MAX
+#endif
+	},
 };
 
 static const struct nl80211_vendor_cmd_info

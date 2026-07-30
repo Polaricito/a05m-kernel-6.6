@@ -355,7 +355,7 @@ enum cluster_type {
 struct sysconf_cluster_info {
 	uint32_t type;		/**< Cluster type (see enum cluster_type) */
 	uint32_t nr_cpus;	/**< Number of cpus in cluster */
-	uint32_t mask;		/**< Available CPUs in cluster */
+	uint64_t mask;		/**< Available CPUs in cluster */
 } __attribute__((__packed__));
 
 /**

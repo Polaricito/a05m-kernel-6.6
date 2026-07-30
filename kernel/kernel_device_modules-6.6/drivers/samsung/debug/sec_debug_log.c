@@ -280,8 +280,8 @@ static int secdbg_klog_buf_init(void)
 		*secdbg_klog_head = 0;
 		*secdbg_klog_buf_pos = 0;
 		*klog_magic = LOG_MAGIC;
-	}
-	else if ((reset_reason == RR_K) ||
+#if !IS_ENABLED(CONFIG_SEC_DEBUG_LEGACY_LK_RESET)
+	} else if ((reset_reason == RR_K) ||
 		(reset_reason == RR_D) ||
 		(reset_reason == RR_P) ||
 		(reset_reason == RR_C) ||
@@ -289,6 +289,7 @@ static int secdbg_klog_buf_init(void)
 		last_kmsg_size = secdbg_lastklog_size;
 		last_kmsg_buffer = phys_to_virt(secdbg_lastklog_base);
 		pr_info("%s: previous klog on last_kmsg buffer (stored by lk_aee)\n", __func__);
+#endif
 	} else {
 		secdbg_save_lastklog(secdbg_lastklog_base, secdbg_lastklog_size);
 	}
