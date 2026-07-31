@@ -73,7 +73,7 @@ jobs:
         if: ${{ inputs.root_provider == 'ksu-next-susfs' }}
         working-directory: ./kernel-6.6
         run: |
-          curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/next-susfs/kernel/setup.sh" | bash -s next-susfs
+          curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/v3.2.0/kernel/setup.sh" | bash -s v3.2.0
           test -d KernelSU-Next || { echo "❌ Falló la integración de KernelSU-Next (SUSFS)"; exit 1; }
           echo "KSUN_COMMIT=$(cd KernelSU-Next && git rev-parse HEAD)" >> "$GITHUB_ENV"
 
@@ -403,6 +403,9 @@ jobs:
         run: |
           echo "📥 Clonando repositorio de SUSFS (Rama gki-android15-6.6)..."
           git clone -b gki-android15-6.6 https://gitlab.com/simonpunk/susfs4ksu.git ../susfs4ksu
+          cd ../susfs4ksu
+          git checkout 2df41de789026a6422521606402576507c687435
+          cd -
 
           echo "📂 Copiando archivos base de SUSFS al kernel..."
           cp -r ../susfs4ksu/kernel_patches/fs/* ./fs/
