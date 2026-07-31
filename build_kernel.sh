@@ -1,6 +1,5 @@
 #!/bin/bash
 cd kernel-6.6
-curl -LSs "https://raw.githubusercontent.com/rsuntk/KernelSU/main/kernel/setup.sh" | bash -s main
 
 echo ""
 	echo -e "Host Arch: `uname -m`"
