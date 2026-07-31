@@ -52,7 +52,7 @@ jobs:
 
       - name: Neutralizar setup.sh original en build_kernel.sh
         run: |
-          sed -i '/tiann\/KernelSU\/main\/kernel\/setup.sh/d' build_kernel.sh
+          sed -i '/rsuntk\/KernelSU\/main\/kernel\/setup.sh/d' build_kernel.sh
 
       - name: Integrar KernelSU-Next
         if: ${{ inputs.root_provider == 'ksu-next-stable' }}
