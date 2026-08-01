@@ -37,6 +37,7 @@ jobs:
           sudo apt-get install -y build-essential bc bison flex libssl-dev \
             libncurses-dev python3 python3-pip zip unzip rsync kmod cpio \
             device-tree-compiler default-jdk git curl patch
+            
       - name: Descargar toolchain (con reintentos)
         run: |
           pip install gdown
@@ -47,9 +48,7 @@ jobs:
           done
           test -s toolchain.tar.gz || { echo "❌ No se pudo descargar el toolchain"; exit 1; }
           tar -xf toolchain.tar.gz
-      - name: Neutralizar setup.sh original en build_kernel.sh
-        run: |
-          sed -i '/tiann\/KernelSU\/main\/kernel\/setup.sh/d' build_kernel.sh
+          
       - name: Integrar KernelSU-Next
         if: ${{ inputs.root_provider == 'ksu-next-stable' }}
         working-directory: ./kernel-6.6
@@ -57,11 +56,12 @@ jobs:
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s v3.3.0
           test -d KernelSU-Next || { echo "❌ Falló la integración de KernelSU-Next"; exit 1; }
           echo "KSUN_COMMIT=$(cd KernelSU-Next && git rev-parse HEAD)" >> "$GITHUB_ENV"
-      - name: Integrar SukiSU-Ultra
+
+      - name: Integrar SukiSU-Ultra (tag v4.1.3, matchea manager público)
         if: ${{ inputs.root_provider == 'sukisu-ultra-v4.1.3' }}
         working-directory: ./kernel-6.6
         run: |
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s v4.1.3
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
           echo "SUKISU_COMMIT=$(cd KernelSU && git rev-parse HEAD)" >> "$GITHUB_ENV"
           echo "🔎 Diagnóstico: setup.sh mencionó '[+] Symlink created.' — veamos qué es exactamente:"
           find . -maxdepth 3 -type l -exec ls -la {} \; 2>/dev/null
@@ -335,6 +335,9 @@ jobs:
           grep -rn "kernelsu" --include="WORKSPACE*" --include="MODULE.bazel*" --include="*.bzl" --include="BUILD.bazel" --include="BUILD" .. 2>/dev/null | grep -vi "drivers/kernelsu/" | head -50
           echo "🔎 ¿Hay algún otro script (fuera de nuestro build_kernel.sh) que mencione 'kernelsu' o 'KernelSU' y pueda re-ejecutar su propio setup?"
           grep -rln "kernelsu\|KernelSU" --include="*.sh" --include="*.py" .. 2>/dev/null | grep -v "build_kernel.sh\|/KernelSU/\|drivers/kernelsu" | head -30
+     
+
+      
       - name: Fijar restricciones del compilador Clang
         working-directory: ./kernel-6.6
         run: |
@@ -352,6 +355,7 @@ jobs:
               echo "⚠️ No se encontró $SELINUX_HIDE_C, si aparece este error de nuevo revisar la ruta"
             fi
           fi
+          
       - name: Habilitar CONFIG_KSU y SUSFS en overlay
         run: |
           CFG=$(grep -rl "CONFIG_KSU" --include="*.config" . 2>/dev/null | head -n1)
@@ -385,6 +389,7 @@ jobs:
           CONFIG_KSU_SUSFS_SUS_MAP=y
           EOF
           fi
+          
       - name: Verificar que el parche de drivers/kernelsu sobrevivió hasta este punto
         working-directory: ./kernel-6.6
         run: |
@@ -393,6 +398,7 @@ jobs:
           grep -q "susfs_init()" drivers/kernelsu/core/init.c \
             && echo "✅ Sigue parcheado justo antes de 'Compilar' — si se rompe, es Bazel/make durante la compilación, no un paso previo de CI" \
             || echo "❌ YA se perdió antes de compilar — algo entre el parcheo y este punto (cache de Bazel restaurada, etc.) lo revirtió"
+            
       - name: Cache de Bazel
         uses: actions/cache@v4
         with:
@@ -408,6 +414,7 @@ jobs:
           echo "───────────────────────────────────────────"
           chmod +x build_kernel.sh
           bash build_kernel.sh
+          
       - name: Diagnóstico post-mortem de drivers/kernelsu (corre siempre, incluso si falló Compilar)
         if: always()
         working-directory: ./kernel-6.6
@@ -427,6 +434,7 @@ jobs:
           grep -q "susfs_init()" KernelSU/kernel/core/init.c 2>/dev/null \
             && echo "   ✅ KernelSU/kernel/core/init.c sigue con susfs_init()" \
             || echo "   ❌ Hasta el original en KernelSU/ perdió el parche"
+            
       - name: Subir artifact
         uses: actions/upload-artifact@v4
         with:
