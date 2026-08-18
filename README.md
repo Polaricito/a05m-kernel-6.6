@@ -9,7 +9,7 @@ build requirement?
 
 how to build?
 - clone this repo
-- run the workfow or use act for run it locally
+- run the workflow or use act for run it locally
 
 Build is gonna take around 1 hour depend on your hardware configuration
 
