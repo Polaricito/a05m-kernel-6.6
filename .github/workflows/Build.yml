@@ -30,93 +30,60 @@ jobs:
           sudo rm -rf /usr/local/lib/android/sdk/system-images \
                       /usr/local/lib/android/sdk/emulator
           sudo apt-get clean
-          df -h
       - name: Instalar dependencias
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential bc bison flex libssl-dev \
             libncurses-dev python3 python3-pip zip unzip rsync kmod cpio \
             device-tree-compiler default-jdk git curl patch
-            
+
       - name: Descargar toolchain (con reintentos)
         run: |
           pip install gdown
           for i in 1 2 3; do
             gdown "https://drive.google.com/uc?id=1um0sIcncTeqVkAE28DwKHlPv1427T5Nb" -O toolchain.tar.gz && break
-            echo "Intento $i falló, reintentando en 10s..."
             sleep 10
           done
-          test -s toolchain.tar.gz || { echo "❌ No se pudo descargar el toolchain"; exit 1; }
+          test -s toolchain.tar.gz
           tar -xf toolchain.tar.gz
-          
+
       - name: Integrar KernelSU-Next
         if: ${{ inputs.root_provider == 'ksu-next-stable' }}
         working-directory: ./kernel-6.6
         run: |
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s v3.3.0
-          test -d KernelSU-Next || { echo "❌ Falló la integración de KernelSU-Next"; exit 1; }
+          test -d KernelSU-Next
           echo "KSUN_COMMIT=$(cd KernelSU-Next && git rev-parse HEAD)" >> "$GITHUB_ENV"
           echo "KERNEL_NAME=KSUN" >> "$GITHUB_ENV"
 
-      - name: Integrar SukiSU-Ultra (tag v4.1.3, matchea manager público)
+      - name: Integrar SukiSU-Ultra
         if: ${{ inputs.root_provider == 'sukisu-ultra-v4.1.3' }}
         working-directory: ./kernel-6.6
         run: |
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/v4.1.3/kernel/setup.sh" | bash -s v4.1.3
           echo "SUKISU_COMMIT=$(cd KernelSU && git rev-parse HEAD)" >> "$GITHUB_ENV"
           echo "KERNEL_NAME=SKSU" >> "$GITHUB_ENV"
-          echo "🔎 Diagnóstico: setup.sh mencionó '[+] Symlink created.' — veamos qué es exactamente:"
-          find . -maxdepth 3 -type l -exec ls -la {} \; 2>/dev/null
-          echo "🔎 ¿Existe alguna carpeta/archivo 'uapi' en lo que acaba de clonar SukiSU-Ultra?"
-          find KernelSU -iname "*uapi*" 2>/dev/null || echo "   (ninguna carpeta ni archivo con 'uapi' en el nombre)"
-          echo "🔎 Contenido completo de KernelSU/kernel/include/uapi (si existe):"
-          find KernelSU/kernel/include/uapi -type f 2>/dev/null || echo "   (no existe)"
-          echo "🔎 Contenido completo de KernelSU/uapi (si existe):"
-          find KernelSU/uapi -type f 2>/dev/null || echo "   (no existe)"
-          echo "🔎 TODAS las ubicaciones de nuestros 5 headers problemáticos en todo KernelSU/:"
-          find KernelSU \( -iname "app_profile.h" -o -iname "feature.h" -o -iname "selinux.h" -o -iname "sulog.h" -o -iname "supercall.h" \) 2>/dev/null
-          echo "🔎 Contenido de KernelSU/kernel/Makefile (para ver flags -I y wiring real):"
-          cat KernelSU/kernel/Makefile 2>/dev/null || echo "   (no existe KernelSU/kernel/Makefile)"
-          
-      - name: Integrar parches SUSFS al código del Kernel (Rama GKI 6.6)
+
+      - name: Integrar parches SUSFS al código del Kernel
         if: ${{ inputs.root_provider == 'sukisu-ultra-v4.1.3' }}
         working-directory: ./kernel-6.6
         run: |
-          echo "📥 Clonando repositorio de SUSFS (Rama gki-android15-6.6)..."
           git clone -b gki-android15-6.6 https://gitlab.com/simonpunk/susfs4ksu.git ../susfs4ksu
-          echo "📂 Copiando archivos base de SUSFS al kernel..."
           cp -r ../susfs4ksu/kernel_patches/fs/* ./fs/
           cp -r ../susfs4ksu/kernel_patches/include/linux/* ./include/linux/
           PATCH_DIR="../susfs4ksu/kernel_patches"
           INIT_C="KernelSU/kernel/core/init.c"
-          echo "🩹 [1/2] Aplicando parche 10 sobre el driver de SukiSU-Ultra (KernelSU/)"
-          if [ ! -f "$PATCH_DIR/KernelSU/10_enable_susfs_for_ksu.patch" ]; then
-            echo "❌ No se encontró 10_enable_susfs_for_ksu.patch en $PATCH_DIR/KernelSU/"
-            exit 1
-          fi
           cp "$PATCH_DIR/KernelSU/10_enable_susfs_for_ksu.patch" ./KernelSU/
-          (cd KernelSU && patch -p1 --forward --fuzz=3 < 10_enable_susfs_for_ksu.patch) || \
-            echo "⚠️ El parche 10 no aplicó completo (probable drift en init.c), se intentará reparar automáticamente."
+          (cd KernelSU && patch -p1 --forward --fuzz=3 < 10_enable_susfs_for_ksu.patch) || true
           if ! grep -q "susfs_init()" "$INIT_C"; then
-            echo "🔧 susfs_init() no quedó insertado en init.c — inyectando manualmente junto a ksu_feature_init()"
-            if ! grep -q "ksu_feature_init();" "$INIT_C"; then
-              echo "❌ No se encontró el ancla ksu_feature_init() en $INIT_C — el driver cambió demasiado, hay que revisar a mano"
-              cat "$INIT_C"
-              exit 1
-            fi
+            grep -q "ksu_feature_init();" "$INIT_C"
             sed -i '/ksu_feature_init();/i\
           #ifdef CONFIG_KSU_SUSFS\
               susfs_init();\
-          #endif // #ifdef KSU_SUSFS\
+          #endif\
           ' "$INIT_C"
-            grep -q "susfs_init()" "$INIT_C" || { echo "❌ La inyección manual de susfs_init() falló"; exit 1; }
-            echo "✅ susfs_init() inyectado correctamente en init.c"
-          else
-            echo "✅ susfs_init() ya presente en init.c (el parche aplicó bien)."
+            grep -q "susfs_init()" "$INIT_C"
           fi
-          echo "🔧 Completando el resto del hunk 7 que falló en init.c: init.c todavía puede tener llamadas a funciones"
-          echo "   que ya no existen en este SukiSU-Ultra (ksu_lsm_hook_init, ksu_late_loaded, ksu_syscall_hook_manager_*)"
-          echo "   coexistiendo con susfs_init() ya inyectado — hay que terminar el reemplazo, no solo la inserción."
           python3 - "$INIT_C" <<'PYEOF'
           import re, sys
           path = sys.argv[1]
@@ -129,20 +96,12 @@ jobs:
               "ksu_init_symbol_resolver", "ksu_syscall_hook_init(",
           ])
           if not needs_fix:
-              print("   ✅ init.c no tiene símbolos viejos, nada que completar")
               sys.exit(0)
-          # 0. Declarar extern directamente en vez de #include (el include con comillas desde
-          #    core/init.c busca relativo a core/, no a la raíz del driver — mismo problema
-          #    que tuvimos con uapi/*.h. Extern evita todo el lío de resolución de rutas.)
           if "SUSFS_AUTOFIX_INIT_EXTERNS" not in content:
               lines = content.split("\n")
               last_include_idx = None
               for i, line in enumerate(lines[:60]):
                   stripped = line.strip()
-                  # Frenar en el primer #if/#ifdef/#ifndef: no queremos insertar dentro de un
-                  # bloque condicional (p.ej. "#if defined(__x86_64__)" tiene sus propios
-                  # #include adentro que en un build ARM64 quedan compilados afuera por el
-                  # preprocesador, y ahí es literalmente donde se perdían nuestras extern).
                   if stripped.startswith("#if"):
                       break
                   if stripped.startswith("#include"):
@@ -156,12 +115,10 @@ jobs:
                   for j, line in enumerate(extern_block):
                       lines.insert(last_include_idx + 1 + j, line)
                   content = "\n".join(lines)
-          # 1. Borrar llamadas a funciones que ya no existen en esta versión (sin reemplazo)
           for func in ["ksu_init_symbol_resolver", "ksu_syscall_hook_init",
                        "ksu_lsm_hook_init", "ksu_syscall_hook_manager_exit",
                        "ksu_sulog_init", "ksu_adb_root_init", "ksu_selinux_hide_init"]:
               content = re.sub(r"^[ \t]*" + func + r"\(\);[ \t]*\n", "", content, flags=re.MULTILINE)
-          # 2. Reemplazar el bloque if (ksu_late_loaded) {...} else {...} por la secuencia plana moderna
           pattern = re.compile(r"[ \t]*if\s*\(ksu_late_loaded\)\s*\{.*?\}\s*else\s*\{.*?\}\n", re.DOTALL)
           replacement = (
               "\tksu_sucompat_init();\n\n"
@@ -176,18 +133,13 @@ jobs:
           )
           content, n = pattern.subn(replacement, content, count=1)
           if n != 1:
-              print(f"   ❌ No se encontró (o se encontró más de una vez: {n}) el bloque if(ksu_late_loaded)/else en kernelsu_init — revisar a mano")
               sys.exit(1)
-          # 3. En kernelsu_exit(), hacer incondicional el ksu_ksud_exit()
           content, n2 = re.subn(
               r"if\s*\(!ksu_late_loaded\)\s*\n\s*ksu_ksud_exit\(\);",
               "ksu_ksud_exit();",
               content,
           )
-          if n2 == 0:
-              print("   ⚠️ No se encontró 'if (!ksu_late_loaded) ksu_ksud_exit();' en kernelsu_exit — puede que ya esté bien, revisar salida final")
           if content == original:
-              print("   ⚠️ El script no modificó nada pese a detectar símbolos viejos, revisar patrones a mano")
               sys.exit(1)
           with open(path, "w") as f:
               f.write(content)
@@ -197,29 +149,13 @@ jobs:
               "ksu_init_symbol_resolver", "ksu_syscall_hook_init(",
           ] if sym in content]
           if remaining:
-              print(f"   ❌ Todavía quedan símbolos viejos tras el fix: {remaining}")
               sys.exit(1)
           if "extern void ksu_sucompat_init(void);" not in content or "extern void ksu_setuid_hook_init(void);" not in content:
-              print("   ❌ Las extern de ksu_sucompat_init/ksu_setuid_hook_init no quedaron insertadas")
               sys.exit(1)
-          print("   ✅ init.c completado: símbolos viejos eliminados, llamadas modernas insertadas, externs agregadas")
           PYEOF
-          echo "📋 Volcado real de las primeras 60 líneas de $INIT_C (para confirmar dónde quedaron las extern):"
-          sed -n '1,60p' "$INIT_C"
-          echo "📋 Todas las líneas con ksu_sucompat_init / ksu_setuid_hook_init en $INIT_C:"
-          grep -n "ksu_sucompat_init\|ksu_setuid_hook_init" "$INIT_C" || echo "   (sin coincidencias — no debería pasar si el paso anterior confirmó que están, revisar)"
-          echo "🩹 [2/2] Aplicando parche 50 sobre el árbol del kernel (fs/, hooks core)..."
           PATCH_50=$(ls $PATCH_DIR/50_add_susfs_in_*.patch | head -n 1)
-          test -n "$PATCH_50" || { echo "❌ No se encontró parche 50_add_susfs_in_*.patch"; exit 1; }
-          
-          patch -p1 --forward < "$PATCH_50" || echo "⚠️ Algunos hunks del parche 50 fallaron. Iniciando inyección manual a prueba de balas..."
-          # --- INICIO DE AUTO-REPARACIÓN BLINDADA ---
-          echo "🛠️ Inyectando dependencias base de SUSFS..."
-          
-          # 1. Hacer que susfs_def.h sea independiente agregando sus propias dependencias
+          patch -p1 --forward < "$PATCH_50" || true
           sed -i '1i #include <linux/sched.h>\n#include <linux/thread_info.h>\n#include <linux/cred.h>' include/linux/susfs_def.h
-          
-          # 2. Insertar al final del bloque de includes en los archivos .c
           for f in mm/memory.c fs/namespace.c fs/open.c fs/proc/base.c fs/exec.c; do
             if ! grep -q "linux/susfs_def.h" "$f"; then
               LAST_INCLUDE=$(grep -n "^#include" "$f" | tail -1 | cut -d: -f1)
@@ -230,32 +166,16 @@ jobs:
               fi
             fi
           done
-          
-          # 3. Inyectar macros y externs (declaraciones extern duplicadas son inofensivas en C,
-          #    así que las aplicamos siempre en vez de intentar adivinar si "ya están" —
-          #    ese detector daba falsos positivos cuando el parche 50 dejaba a medias
-          #    un símbolo declarado y otro no, o cuando el ancla ("retry:") ya existía
-          #    en el archivo por otro motivo ajeno a SUSFS.)
           if ! grep -q "SUSFS_AUTOFIX_NAMESPACE" fs/namespace.c; then
-            echo "   [namespace.c] inyectando externs (marcador propio no encontrado)"
             sed -i '/#include <linux\/susfs_def.h>/a #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT\n/* SUSFS_AUTOFIX_NAMESPACE */\nextern bool susfs_is_current_ksu_domain(void);\nextern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;\n#define CL_COPY_MNT_NS BIT(25)\n#endif' fs/namespace.c
-          else
-            echo "   [namespace.c] ya aplicado en esta corrida -> salteado"
           fi
           if ! grep -q "SUSFS_AUTOFIX_OPEN_EXTERNS" fs/open.c; then
-            echo "   [open.c] inyectando externs (ksu_su_compat_enabled / __ksu_is_allow_uid_for_current / ksu_handle_faccessat)"
             sed -i '/#include <linux\/susfs_def.h>/a #ifdef CONFIG_KSU_SUSFS\n/* SUSFS_AUTOFIX_OPEN_EXTERNS */\nextern struct static_key_true ksu_su_compat_enabled;\nextern bool __ksu_is_allow_uid_for_current(uid_t uid);\nextern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode, int *flags);\n#endif' fs/open.c
-          else
-            echo "   [open.c] externs ya aplicados en esta corrida -> salteado"
           fi
           if ! grep -q "SUSFS_AUTOFIX_RETRY_LABEL" fs/open.c; then
-            echo "   [open.c] inyectando label retry: con marcador propio"
             sed -i '/fd = get_unused_fd_flags(how->flags);/a #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT\n/* SUSFS_AUTOFIX_RETRY_LABEL */\nretry:\n#endif' fs/open.c
-          else
-            echo "   [open.c] label retry ya aplicada en esta corrida -> salteado"
           fi
           if ! grep -q "SUSFS_AUTOFIX_OPEN_REDIRECT_BLOCK" fs/open.c; then
-            echo "   [open.c] inyectando bloque de uso de open_redirect (fake_filename / is_inode_open_redirect)"
             sed -i '/struct file \*f = do_filp_open(dfd, tmp, &op);/a \
           #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT\n\
           \t\t/* SUSFS_AUTOFIX_OPEN_REDIRECT_BLOCK */\n\
@@ -273,106 +193,49 @@ jobs:
           \t\t\t}\n\
           \t\t}\n\
           #endif' fs/open.c
-          else
-            echo "   [open.c] bloque open_redirect ya aplicado en esta corrida -> salteado"
           fi
           if ! grep -q "SUSFS_AUTOFIX_EXEC" fs/exec.c; then
-            echo "   [exec.c] inyectando externs"
             sed -i '/#include <linux\/susfs_def.h>/a #ifdef CONFIG_KSU_SUSFS\n/* SUSFS_AUTOFIX_EXEC */\nextern struct static_key_true ksu_su_compat_enabled;\nextern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;\nextern bool __ksu_is_allow_uid_for_current(uid_t uid);\nextern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv, void *envp, int *flags);\nextern int ksu_handle_execveat_sucompat(int *fd, struct filename **filename_ptr, void *argv, void *envp, int *flags);\n#endif' fs/exec.c
-          else
-            echo "   [exec.c] ya aplicado en esta corrida -> salteado"
           fi
-          echo "📋 Estado real de fs/open.c tras la auto-reparación (líneas relevantes):"
-          grep -n "susfs_def.h\|ksu_handle_faccessat\|ksu_su_compat_enabled\|__ksu_is_allow_uid_for_current\|fake_filename\|is_inode_open_redirect\|SUSFS_AUTOFIX" fs/open.c || echo "   (grep no encontró ninguna coincidencia — el include de susfs_def.h probablemente no está en este archivo)"
-          echo "🔎 Verificando que los marcadores de auto-reparación realmente quedaron insertados (el sed no avisa si el ancla no matcheó)..."
           for check in "fs/namespace.c:SUSFS_AUTOFIX_NAMESPACE" "fs/open.c:SUSFS_AUTOFIX_OPEN_EXTERNS" "fs/open.c:SUSFS_AUTOFIX_RETRY_LABEL" "fs/open.c:SUSFS_AUTOFIX_OPEN_REDIRECT_BLOCK" "fs/exec.c:SUSFS_AUTOFIX_EXEC"; do
             file="${check%%:*}"
             marker="${check##*:}"
-            if grep -q "$marker" "$file"; then
-              echo "   ✅ $marker presente en $file"
-            else
-              echo "   ❌ $marker NO quedó insertado en $file — el ancla del sed no matcheó, revisar a mano"
+            if ! grep -q "$marker" "$file"; then
               exit 1
             fi
           done
-          echo "✅ Auto-reparación completada con éxito."
-          # --- FIN DE AUTO-REPARACIÓN BLINDADA ---
           if ls $PATCH_DIR/51_susfs_add_hook_in_*.patch 1> /dev/null 2>&1; then
-            patch -p1 --forward < $(ls $PATCH_DIR/51_susfs_add_hook_in_*.patch | head -n 1) || {
-              echo "❌ Falló el parche 51 — revisar *.rej:"
-              find . -name '*.rej' -exec echo "--- {} ---" \; -exec cat {} \;
-              exit 1
-            }
-          else
-            echo "ℹ️ Parche 51 no encontrado, los hooks probablemente estén unificados en el parche 50."
+            patch -p1 --forward < $(ls $PATCH_DIR/51_susfs_add_hook_in_*.patch | head -n 1)
           fi
-          grep -q "susfs" fs/Makefile || { echo "❌ El parche 50 no modificó fs/Makefile como se esperaba, abortando en vez de inyectar a mano"; exit 1; }
-          echo "🔎 Diagnóstico: ¿cómo está wireado infra/symbol_resolver y hook/syscall_hook en el Makefile del driver?"
-          echo "   (buscamos esto porque 'find_kernel_symbol_exact' da undefined symbol al linkear —"
-          echo "    probablemente porque symbol_resolver.c sigue compilándose aunque ya no lo llame nadie)"
-          grep -n "symbol_resolver\|syscall_hook" KernelSU/kernel/Makefile KernelSU/kernel/Kbuild 2>/dev/null || echo "   (sin coincidencias de symbol_resolver/syscall_hook en Makefile/Kbuild del nivel raíz del driver)"
-          echo "🔎 ¿find_kernel_symbol_exact aparece definida en algún .c de todo KernelSU/?"
-          grep -rn "find_kernel_symbol_exact" KernelSU/ 2>/dev/null | head -20 || echo "   (sin coincidencias de find_kernel_symbol_exact en todo KernelSU/)"
-          echo "🔎 ¿En qué Makefile/Kbuild (de cualquier subcarpeta) está wireado infra/symbol_resolver.o?"
-          grep -rln "symbol_resolver" --include="Makefile" --include="Kbuild" KernelSU/ 2>/dev/null || echo "   (ningún Makefile/Kbuild en ninguna subcarpeta menciona symbol_resolver)"
-          echo "🔎 Contenido de KernelSU/kernel/infra/Makefile (si existe):"
-          cat KernelSU/kernel/infra/Makefile 2>/dev/null || echo "   (no existe)"
-          echo "🔧 infra/symbol_resolver.o falta en kernelsu-objs del Kbuild (feature/uts_spoof.c lo necesita y sí está listado) — agregándolo"
+          grep -q "susfs" fs/Makefile
           KBUILD_FILE="KernelSU/kernel/Kbuild"
           if [ -f "$KBUILD_FILE" ] && ! grep -q "infra/symbol_resolver.o" "$KBUILD_FILE"; then
             sed -i '/infra\/su_mount_ns.o/a kernelsu-objs += infra/symbol_resolver.o' "$KBUILD_FILE"
-            grep -q "infra/symbol_resolver.o" "$KBUILD_FILE" || { echo "❌ No se pudo insertar infra/symbol_resolver.o en $KBUILD_FILE"; exit 1; }
-            echo "✅ infra/symbol_resolver.o agregado a kernelsu-objs"
-          else
-            echo "ℹ️ infra/symbol_resolver.o ya está en kernelsu-objs (o no existe el Kbuild), no hace falta tocar nada"
+            grep -q "infra/symbol_resolver.o" "$KBUILD_FILE"
           fi
-          echo "   No lo tocamos: reemplazarlo por una copia real rompe la resolución de '../uapi' que usan"
-          echo "   los headers internos (policy/app_profile.h, etc.) para encontrar KernelSU/uapi/."
-          ls -la drivers/kernelsu 2>/dev/null || echo "⚠️ drivers/kernelsu no existe o no es lo esperado, revisar"
-          grep -q "susfs_init()" drivers/kernelsu/core/init.c || { echo "❌ drivers/kernelsu/core/init.c no tiene susfs_init(), el symlink no está apuntando a KernelSU/kernel parcheado"; exit 1; }
-          echo "✅ drivers/kernelsu (vía symlink) refleja el driver ya parcheado con SUSFS, justo después de parchear"
-          echo "🔎 Diagnóstico extra: ¿drivers/kernelsu está registrado como submódulo de git o como dependencia externa de Bazel?"
-          echo "   (si Bazel lo re-materializa desde ahí al compilar, nuestro symlink/parche se pierde antes de que 'make' lo compile)"
-          find .. -maxdepth 3 -name ".gitmodules" -exec echo "--- {} ---" \; -exec cat {} \; 2>/dev/null
-          grep -rn "kernelsu" --include="WORKSPACE*" --include="MODULE.bazel*" --include="*.bzl" --include="BUILD.bazel" --include="BUILD" .. 2>/dev/null | grep -vi "drivers/kernelsu/" | head -50
-          echo "🔎 ¿Hay algún otro script (fuera de nuestro build_kernel.sh) que mencione 'kernelsu' o 'KernelSU' y pueda re-ejecutar su propio setup?"
-          grep -rln "kernelsu\|KernelSU" --include="*.sh" --include="*.py" .. 2>/dev/null | grep -v "build_kernel.sh\|/KernelSU/\|drivers/kernelsu" | head -30
-     
+          grep -q "susfs_init()" drivers/kernelsu/core/init.c
 
-      
       - name: Fijar restricciones del compilador Clang
         working-directory: ./kernel-6.6
         run: |
-          echo "🛠️ Inyectando pragma para ignorar errores estrictos de array-bounds en signal.h..."
           sed -i '1i #pragma GCC diagnostic ignored "-Warray-bounds"' include/linux/signal.h
           if [ "${{ inputs.root_provider }}" == "sukisu-ultra-v4.1.3" ]; then
             SELINUX_HIDE_C="KernelSU/kernel/feature/selinux_hide.c"
             if [ -f "$SELINUX_HIDE_C" ]; then
-              echo "🛠️ Inyectando pragma para ignorar -Wpointer-bool-conversion en selinux_hide.c"
-              echo "   (el código chequea 'if (nombre_de_funcion)' en vez de un puntero a función,"
-              echo "    lo que Clang moderno marca como error con -Werror; no es algo que debamos"
-              echo "    reescribir a mano en código de SukiSU-Ultra que no es nuestro)"
               sed -i '1i #pragma GCC diagnostic ignored "-Wpointer-bool-conversion"' "$SELINUX_HIDE_C"
-            else
-              echo "⚠️ No se encontró $SELINUX_HIDE_C, si aparece este error de nuevo revisar la ruta"
             fi
           fi
-          
+
       - name: Habilitar CONFIG_KSU y SUSFS en overlay
         run: |
           CFG=$(grep -rl "CONFIG_KSU" --include="*.config" . 2>/dev/null | head -n1)
           if [ -z "$CFG" ]; then
             CFG="./kernel/kernel_device_modules-6.6/kernel/configs/mt6768_overlay.config"
-            echo "⚠️ No se encontró config existente, usando default: $CFG"
           fi
-          echo "Usando config: $CFG"
-          
           if ! grep -q "CONFIG_KSU=y" "$CFG"; then
             echo "CONFIG_KSU=y" >> "$CFG"
           fi
-          
           if [ "${{ inputs.root_provider }}" == "sukisu-ultra-v4.1.3" ]; then
-            echo "Inyectando flags completas de SUSFS..."
             sed -i '/CONFIG_KSU_SUSFS/d' "$CFG"
             cat <<EOF >> "$CFG"
           CONFIG_KSU_SUSFS=y
@@ -391,16 +254,7 @@ jobs:
           CONFIG_KSU_SUSFS_SUS_MAP=y
           EOF
           fi
-          
-      - name: Verificar que el parche de drivers/kernelsu sobrevivió hasta este punto
-        working-directory: ./kernel-6.6
-        run: |
-          echo "🔎 Justo antes de compilar — ¿drivers/kernelsu todavía tiene susfs_init()?"
-          ls -la drivers/kernelsu
-          grep -q "susfs_init()" drivers/kernelsu/core/init.c \
-            && echo "✅ Sigue parcheado justo antes de 'Compilar' — si se rompe, es Bazel/make durante la compilación, no un paso previo de CI" \
-            || echo "❌ YA se perdió antes de compilar — algo entre el parcheo y este punto (cache de Bazel restaurada, etc.) lo revirtió"
-            
+
       - name: Cache de Bazel
         uses: actions/cache@v4
         with:
@@ -411,32 +265,9 @@ jobs:
 
       - name: Compilar
         run: |
-          echo "📄 Contenido completo de build_kernel.sh (para ver si resetea submódulos/git antes de invocar bazel/make):"
-          cat -n build_kernel.sh
-          echo "───────────────────────────────────────────"
           chmod +x build_kernel.sh
           bash build_kernel.sh
-          
-      - name: Diagnóstico post-mortem de drivers/kernelsu (corre siempre, incluso si falló Compilar)
-        if: always()
-        working-directory: ./kernel-6.6
-        run: |
-          echo "🔎 Estado de drivers/kernelsu DESPUÉS del intento de compilación:"
-          ls -la drivers/kernelsu 2>/dev/null || echo "   No existe / no se puede acceder"
-          if [ -L drivers/kernelsu ]; then
-            echo "   Es un symlink, apunta a: $(readlink drivers/kernelsu)"
-          elif [ -d drivers/kernelsu ]; then
-            echo "   Es un directorio real (no symlink)"
-          fi
-          echo "🔎 ¿Todavía tiene susfs_init()?"
-          grep -q "susfs_init()" drivers/kernelsu/core/init.c 2>/dev/null \
-            && echo "   ✅ Sigue con susfs_init() — el error de compilación no fue por reversión de este archivo" \
-            || echo "   ❌ Ya NO tiene susfs_init() — algo lo reescribió/reapuntó durante la compilación"
-          echo "🔎 ¿./KernelSU/kernel/core/init.c (el original que parcheamos) sigue intacto?"
-          grep -q "susfs_init()" KernelSU/kernel/core/init.c 2>/dev/null \
-            && echo "   ✅ KernelSU/kernel/core/init.c sigue con susfs_init()" \
-            || echo "   ❌ Hasta el original en KernelSU/ perdió el parche"
-            
+
       - name: Subir artifact
         uses: actions/upload-artifact@v4
         with:
