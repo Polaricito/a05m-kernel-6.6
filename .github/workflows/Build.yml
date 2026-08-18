@@ -79,7 +79,7 @@ jobs:
           grep -q "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" fs/Makefile
           grep -q "ksu_handle_execveat(&fd" fs/exec.c
           grep -q "ksu_handle_faccessat(&dfd" fs/open.c
-          grep -q "ksu_handle_sys_reboot(magic1" kernel/sys.c
+          grep -q "ksu_handle_sys_reboot(magic1" kernel/reboot.c
           grep -q "ksu_handle_sys_read(fd);" fs/read_write.c
           grep -q "ksu_handle_vfs_fstat(fd" fs/stat.c
           grep -q "ksu_handle_stat(&dfd" fs/stat.c
