@@ -1,6 +1,6 @@
 Samsung A05 (A055F/M), One UI 7, Android 15, 6.6 Kernel Source
 - KernelSU-Next Included
-- SukiSU-Ultra with SUSFS Included
+- SukiSU-Ultra with SuSFS Included
 
 build requirement?
 - know how to operate & use linux CLI
@@ -8,10 +8,14 @@ build requirement?
 - pc/laptop/device/VM running ubuntu or debian with at least 2 cores & 4GB ram allocated 
 
 how to build?
-- clone this repo
-- run the workflow or use act for run it locally
+- fork this repo
+- choose the root type and then run the workflow
 
-Build is gonna take around 1 hour depend on your hardware configuration
+how to build locally?
+- clone this repo
+- use a tool like act to run it
+
+Build is gonna take around 1-5 hour depend on your hardware configuration
 
 After finish it would automatically compressed into a05m-6.6-kernel-*****.zip
 
