@@ -1,4 +1,14 @@
 #!/bin/bash
+# Kernel version suffix: KSUN (KernelSU-Next) or SKSU (SukiSU-Ultra).
+# Leave empty for a plain version, e.g. 6.6.129.
+KERNEL_NAME="${KERNEL_NAME:-}"
+INFO_FILE="kernel/kernel_device_modules-6.6/kernel/configs/mt6768_overlay.config"
+
+if [ -n "$KERNEL_NAME" ]; then
+    sed -i '/^CONFIG_LOCALVERSION=/d' "$INFO_FILE"
+    printf 'CONFIG_LOCALVERSION="-%s"\n' "$KERNEL_NAME" >> "$INFO_FILE"
+fi
+
 cd kernel-6.6
 
 echo ""
@@ -38,7 +48,15 @@ KERNEL_IMAGE="$(pwd)/out/target/product/a05m/obj/KLEAF_OBJ/dist/kernel_device_mo
 ZIPNAME="a05m-6.6-kernel"
 INFO_FILE="$(pwd)/kernel/kernel_device_modules-6.6/kernel/configs/mt6768_overlay.config"
 KERNEL_VERSION_NAME=$(grep "CONFIG_LOCALVERSION=" "$INFO_FILE" | sed -n 's/.*CONFIG_LOCALVERSION="\([^"]*\)".*/\1/p')
-sed -i "s/kernel.string=.*/kernel.string=\"a05m-${KERNEL_VERSION_NAME}-kernel\"/" "$ANYKERNEL_FILE"
+KERNEL_LABEL="${KERNEL_NAME:-${KERNEL_VERSION_NAME#-}}"
+[ -n "$KERNEL_LABEL" ] || KERNEL_LABEL="kernel"
+
+if [ "$KERNEL_LABEL" = "kernel" ]; then
+    KERNEL_STRING="a05m-kernel"
+else
+    KERNEL_STRING="a05m-${KERNEL_LABEL}-kernel"
+fi
+sed -i "s/kernel.string=.*/kernel.string=\"${KERNEL_STRING}\"/" "$ANYKERNEL_FILE"
 
 set -e
 
@@ -56,7 +74,11 @@ echo "Kernel image and AnyKernel3 directory found"
 
 mv "$KERNEL_IMAGE" "$ANYKERNEL_DIR/"
 TIMESTAMP=$(date +"(%Y.%m.%d.%H.%M.%S)")
-FINAL_ZIP_NAME="${ZIPNAME}-${KERNEL_VERSION_NAME}-${TIMESTAMP}.zip"
+if [ "$KERNEL_LABEL" = "kernel" ]; then
+    FINAL_ZIP_NAME="${ZIPNAME}-${TIMESTAMP}.zip"
+else
+    FINAL_ZIP_NAME="${ZIPNAME}-${KERNEL_LABEL}-${TIMESTAMP}.zip"
+fi
 echo "Creating zip file: $FINAL_ZIP_NAME"
 
 (cd "$ANYKERNEL_DIR" && zip -r9 "../$FINAL_ZIP_NAME" ./*)
