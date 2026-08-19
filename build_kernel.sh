@@ -81,7 +81,19 @@ else
 fi
 echo "Creating zip file: $FINAL_ZIP_NAME"
 
-(cd "$ANYKERNEL_DIR" && zip -r9 "../$FINAL_ZIP_NAME" ./*)
+if command -v zip >/dev/null 2>&1; then
+    (cd "$ANYKERNEL_DIR" && zip -r9 "../$FINAL_ZIP_NAME" ./*)
+else
+    python3 -c "
+import os, zipfile
+with zipfile.ZipFile('$FINAL_ZIP_NAME', 'w', zipfile.ZIP_DEFLATED) as zf:
+    for root, dirs, files in os.walk('$ANYKERNEL_DIR'):
+        for f in files:
+            full = os.path.join(root, f)
+            rel = os.path.relpath(full, '$ANYKERNEL_DIR')
+            zf.write(full, rel)
+"
+fi
 
 echo " "
 echo "✅ Done! Flashable zip created successfully"
