@@ -1,5 +1,5 @@
 Samsung A05 (A055F/M), One UI 7, Android 15, 6.6 Kernel Source
-- KernelSU-Next Included
+- KernelSU-Next with SuSFS Included
 - SukiSU-Ultra with SuSFS Included
 
 build requirement?
