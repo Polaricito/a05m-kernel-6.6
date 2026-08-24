@@ -52,7 +52,7 @@ jobs:
         if: ${{ inputs.root_provider == 'ksu-next-stable' }}
         working-directory: ./kernel-6.6
         run: |
-          curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/dev-susfs/kernel/setup.sh" | bash -s dev-susfs
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/dev/kernel/setup.sh" | bash -s dev
           test -d KernelSU-Next
           sed -i 's/static int security_context_to_sid_with_policy/int security_context_to_sid_with_policy/' KernelSU-Next/kernel/feature/selinux_hide.c
           sed -i 's/static int security_sid_to_context_with_policy/int security_sid_to_context_with_policy/' KernelSU-Next/kernel/feature/selinux_hide.c
@@ -64,44 +64,10 @@ jobs:
         if: ${{ inputs.root_provider == 'sukisu-ultra-v4.1.3' }}
         working-directory: ./kernel-6.6
         run: |
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/builtin/kernel/setup.sh" | bash -s builtin
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
           test -d KernelSU/kernel
           echo "SUKISU_COMMIT=$(cd KernelSU && git rev-parse HEAD)" >> "$GITHUB_ENV"
           echo "KERNEL_NAME=SKSU" >> "$GITHUB_ENV"
-
-      - name: Integrar parches SUSFS al código del Kernel
-        working-directory: ./kernel-6.6
-        run: |
-          git clone -b gki-android15-6.6 https://gitlab.com/simonpunk/susfs4ksu.git ../susfs4ksu
-          cp -f ../susfs4ksu/kernel_patches/fs/susfs.c ./fs/susfs.c
-          cp -f ../susfs4ksu/kernel_patches/include/linux/susfs.h ./include/linux/susfs.h
-          cp -f ../susfs4ksu/kernel_patches/include/linux/susfs_def.h ./include/linux/susfs_def.h
-          sed -i '1i #include <linux/sched.h>\n#include <linux/thread_info.h>\n#include <linux/cred.h>' include/linux/susfs_def.h
-          sed -i '/#ifdef CONFIG_SECURITY_DEFEX/,/^#endif/d' fs/open.c
-          sed -i '/copy_flags = CL_COPY_UNBINDABLE | CL_EXPIRE;/,/#endif/ {
-            /#ifdef CONFIG_KDP_NS/,/#endif/ {
-               /#else/,/#endif/!d
-               /#else/d
-               /#endif/d
-            }
-          }' fs/namespace.c
-          patch -p1 --forward --fuzz=3 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch || true
-          if grep -q 'VMA_PAD_START(' fs/proc/task_mmu.c && ! grep -qE '#include <linux/pgsize_migration(_inline)?\.h>|define VMA_PAD_START' fs/proc/task_mmu.c; then
-            sed -i '1a #ifndef VMA_PAD_START\n#define VMA_PAD_START(vma) ((vma)->vm_end)\n#endif' fs/proc/task_mmu.c
-          fi
-          if grep -q '__fold_filemap_fixup_entry' fs/proc/task_mmu.c && ! grep -q '#include <linux/page_size_compat.h>' fs/proc/task_mmu.c; then
-            sed -i '/#include <linux\/pkeys.h>/a #include <linux/page_size_compat.h>' fs/proc/task_mmu.c
-          fi
-          grep -q "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" fs/Makefile
-          grep -q "ksu_handle_execveat(&fd" fs/exec.c
-          grep -q "ksu_handle_faccessat(&dfd" fs/open.c
-          grep -q "ksu_handle_sys_reboot(magic1" kernel/reboot.c
-          grep -q "ksu_handle_sys_read(fd);" fs/read_write.c
-          grep -q "ksu_handle_vfs_fstat(fd" fs/stat.c
-          grep -q "ksu_handle_stat(&dfd" fs/stat.c
-          grep -q "susfs_is_inode_sus_path" fs/namei.c
-          grep -q "#define SUSFS_VERSION" include/linux/susfs.h
-          find . -name "*.rej" -print
 
       - name: Fijar restricciones del compilador Clang
         working-directory: ./kernel-6.6
@@ -113,7 +79,7 @@ jobs:
             fi
           done
 
-      - name: Habilitar CONFIG_KSU y SUSFS en overlay
+      - name: Habilitar CONFIG_KSU en overlay
         run: |
           CFG=$(grep -rl "CONFIG_KSU" --include="*.config" . 2>/dev/null | head -n1)
           if [ -z "$CFG" ]; then
@@ -122,18 +88,7 @@ jobs:
           if ! grep -q "CONFIG_KSU=y" "$CFG"; then
             echo "CONFIG_KSU=y" >> "$CFG"
           fi
-          sed -i '/CONFIG_KSU_SUSFS/d' "$CFG"
           cat <<EOF >> "$CFG"
-          CONFIG_KSU_SUSFS=y
-          CONFIG_KSU_SUSFS_SUS_PATH=y
-          CONFIG_KSU_SUSFS_SUS_MOUNT=y
-          CONFIG_KSU_SUSFS_SUS_KSTAT=y
-          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
-          CONFIG_KSU_SUSFS_ENABLE_LOG=y
-          CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
-          CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
-          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
-          CONFIG_KSU_SUSFS_SUS_MAP=y
           CONFIG_OVERLAY_FS=y
           CONFIG_TMPFS_XATTR=y
           CONFIG_TMPFS_POSIX_ACL=y

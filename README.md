@@ -1,6 +1,6 @@
 Samsung A05 (A055F/M), One UI 7, Android 15, 6.6 Kernel Source
-- KernelSU-Next with SuSFS Included
-- SukiSU-Ultra with SuSFS Included
+- KernelSU-Next (default branch, no SuSFS)
+- SukiSU-Ultra (default branch, no SuSFS)
 
 build requirement?
 - know how to operate & use linux CLI
